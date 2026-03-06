@@ -5,26 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LeverUp Trader Console</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Orbitron:wght@600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
     :root {
-      --bg: #131514;
-      --bg-soft: #111313;
-      --panel: #1b1b1b;
-      --panel-2: #1c1d1e;
-      --panel-3: #252727;
-      --panel-4: #1f1f20;
-      --text: #fafafa;
-      --text-soft: #e1e1e1;
-      --muted: #7c8080;
-      --muted-2: #707070;
+      --bg: #0d0f0f;
+      --bg-soft: #121313;
+      --panel: #171919;
+      --panel-2: #1b1d1d;
+      --panel-3: #212424;
+      --panel-4: #101111;
+      --text: #f2f4f4;
+      --text-soft: #d4d7d7;
+      --muted: #8c9292;
+      --muted-2: #6f7474;
       --accent: #ccff00;
-      --accent-2: #3cffe1;
+      --accent-2: #7bf6da;
       --good: #c7f50d;
       --bad: #fa5000;
-      --border: #2a2a2a;
-      --border-2: #3a3b3b;
-      --shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+      --border: #313535;
+      --border-2: #484c4c;
+      --shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
     }
     * { box-sizing: border-box; }
     html {
@@ -34,13 +37,13 @@
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at 12% -4%, rgba(204,255,0,.14), transparent 24%),
-        radial-gradient(circle at 84% 0%, rgba(60,255,225,.1), transparent 18%),
-        linear-gradient(180deg, #131514 0%, #111313 42%, #0f1010 100%);
+        linear-gradient(180deg, rgba(204,255,0,.035), transparent 10%),
+        linear-gradient(180deg, #111212 0%, #0d0f0f 46%, #090a0a 100%);
       color: var(--text);
       position: relative;
+      font-variant-numeric: tabular-nums;
     }
     body::before {
       content: "";
@@ -48,22 +51,22 @@
       inset: 0;
       pointer-events: none;
       background:
-        linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
-      background-size: 48px 48px;
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+      background-size: 40px 40px;
       mask-image: linear-gradient(180deg, rgba(0,0,0,.28), transparent 88%);
-      opacity: .28;
+      opacity: .22;
     }
     body::after {
       content: "";
       position: fixed;
-      inset: auto 5% -180px auto;
-      width: 360px;
-      height: 360px;
+      inset: 0;
+      width: auto;
+      height: auto;
       pointer-events: none;
-      background: radial-gradient(circle, rgba(168,85,255,.16), transparent 60%);
-      filter: blur(30px);
-      opacity: .32;
+      background:
+        linear-gradient(110deg, transparent 0%, transparent 55%, rgba(204,255,0,.03) 72%, transparent 100%);
+      opacity: .55;
     }
     .wrap {
       max-width: 1460px;
@@ -73,9 +76,9 @@
     }
     .hero {
       position: relative;
-      border: 1px solid rgba(204,255,0,.18);
-      background: linear-gradient(180deg, rgba(27,27,27,.96), rgba(20,20,20,.96));
-      border-radius: 16px;
+      border: 1px solid var(--border-2);
+      background: linear-gradient(180deg, rgba(24,26,26,.98), rgba(18,19,19,.99));
+      border-radius: var(--radius-md);
       padding: 16px 18px 18px;
       box-shadow: var(--shadow);
       overflow: hidden;
@@ -83,21 +86,21 @@
     .hero::before {
       content: "";
       position: absolute;
-      inset: 0;
+      inset: 0 0 auto 0;
       pointer-events: none;
-      background: linear-gradient(120deg, rgba(204,255,0,.05), transparent 40%, transparent 60%, rgba(60,255,225,.05));
+      height: 2px;
+      background: linear-gradient(90deg, rgba(204,255,0,.9), rgba(204,255,0,.18) 45%, transparent 100%);
     }
     .hero::after {
       content: "";
       position: absolute;
-      right: -10%;
-      top: -50%;
-      width: 40%;
-      height: 220%;
+      right: 0;
+      top: 0;
+      width: 38%;
+      height: 100%;
       pointer-events: none;
-      background: radial-gradient(circle, rgba(168,85,255,.16), transparent 55%);
-      filter: blur(40px);
-      opacity: .35;
+      background: linear-gradient(135deg, rgba(255,255,255,.05), transparent 65%);
+      opacity: .16;
     }
     .topbar {
       display: flex;
@@ -108,7 +111,7 @@
       position: relative;
       z-index: 1;
       padding-bottom: 16px;
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      border-bottom: 1px solid rgba(255,255,255,.07);
     }
     .brand {
       display: flex;
@@ -128,16 +131,16 @@
       margin: 0 0 6px;
       color: var(--muted);
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: .16em;
       text-transform: uppercase;
     }
     h1 {
       margin: 0;
-      font-size: 30px;
+      font-size: 28px;
       line-height: 1;
-      font-weight: 800;
-      letter-spacing: .01em;
+      font-weight: 700;
+      letter-spacing: .02em;
     }
     p.sub {
       margin: 0;
@@ -156,19 +159,22 @@
       align-items: center;
       justify-content: center;
       padding: 10px 14px;
-      border-radius: 999px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--border);
-      background: rgba(37,39,39,.6);
+      background: rgba(16,17,17,.96);
       color: var(--text-soft);
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
       text-decoration: none;
-      transition: background .18s ease, border-color .18s ease, color .18s ease;
+      transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
     }
     .topnav a:hover {
       color: var(--text);
-      border-color: rgba(204,255,0,.35);
-      background: rgba(37,39,39,.95);
+      border-color: rgba(204,255,0,.42);
+      background: rgba(25,27,27,.98);
+      transform: translateY(-1px);
     }
     .hero-grid {
       margin-top: 18px;
@@ -190,11 +196,13 @@
       align-items: center;
       gap: 6px;
       padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(18,18,18,.72);
+      border-radius: var(--radius-sm);
+      background: rgba(12,13,13,.9);
       border: 1px solid var(--border);
       color: var(--text-soft);
       font-size: 12px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
     }
     .market-pills strong {
       color: var(--accent);
@@ -203,12 +211,10 @@
     .usage-guide {
       margin-top: 16px;
       padding: 14px 16px;
-      border-radius: 14px;
-      border: 1px solid rgba(204,255,0,.22);
-      background:
-        linear-gradient(180deg, rgba(26,29,17,.96), rgba(18,20,14,.98)),
-        radial-gradient(circle at top right, rgba(204,255,0,.08), transparent 36%);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(204,255,0,.34);
+      background: linear-gradient(180deg, rgba(25,28,20,.98), rgba(16,18,15,.99));
+      box-shadow: inset 3px 0 0 rgba(204,255,0,.92);
     }
     .usage-guide h3 {
       margin: 0 0 10px;
@@ -229,13 +235,13 @@
       margin-top: 4px;
     }
     .usage-guide strong {
-      color: #f5ffd0;
+      color: #f1f7d2;
     }
     .hero-summary {
       padding: 14px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,.06);
-      background: linear-gradient(180deg, rgba(31,31,32,.9), rgba(23,23,23,.9));
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(20,21,21,.98), rgba(14,15,15,.98));
     }
     .status-row {
       display: grid;
@@ -250,9 +256,9 @@
     }
     .card {
       position: relative;
-      background: linear-gradient(180deg, rgba(29,30,30,.95) 0%, rgba(24,25,25,.98) 100%);
+      background: linear-gradient(180deg, rgba(22,23,23,.98) 0%, rgba(16,17,17,.99) 100%);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: var(--radius-md);
       padding: 18px;
       box-shadow: var(--shadow);
       min-width: 0;
@@ -261,12 +267,13 @@
     .card::before {
       content: "";
       position: absolute;
-      left: 18px;
-      right: 18px;
+      left: 0;
+      right: auto;
       top: 0;
-      height: 1px;
-      background: linear-gradient(90deg, rgba(204,255,0,.55), rgba(255,255,255,0));
-      opacity: .65;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(204,255,0,.85), rgba(204,255,0,.08) 52%, transparent 100%);
+      opacity: .72;
     }
     .card h2 {
       margin: 0 0 16px;
@@ -290,9 +297,9 @@
     input, select, textarea {
       width: 100%;
       border: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(31,31,32,.98), rgba(27,27,27,.98));
+      background: linear-gradient(180deg, rgba(16,17,17,.98), rgba(13,14,14,.98));
       color: var(--text);
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       padding: 12px 13px;
       outline: none;
       font: inherit;
@@ -304,8 +311,8 @@
       color: var(--muted);
     }
     input:focus, select:focus, textarea:focus {
-      border-color: rgba(204,255,0,.5);
-      box-shadow: 0 0 0 3px rgba(204,255,0,.12);
+      border-color: rgba(204,255,0,.6);
+      box-shadow: 0 0 0 1px rgba(204,255,0,.22);
     }
     input[readonly], textarea[readonly] {
       color: var(--text-soft);
@@ -333,8 +340,8 @@
     .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
     .btns > button { flex: 1 1 180px; }
     button {
-      border: 1px solid transparent;
-      border-radius: 8px;
+      border: 1px solid rgba(204,255,0,.48);
+      border-radius: var(--radius-sm);
       min-height: 44px;
       padding: 11px 14px;
       background: var(--accent);
@@ -342,9 +349,10 @@
       font: inherit;
       font-size: 14px;
       font-weight: 700;
-      letter-spacing: .01em;
+      letter-spacing: .05em;
+      text-transform: uppercase;
       cursor: pointer;
-      box-shadow: 0 0 0 1px rgba(0,0,0,.14), 0 12px 22px rgba(204,255,0,.18);
+      box-shadow: none;
       transition: transform .16s ease, filter .16s ease, background .16s ease, border-color .16s ease, color .16s ease;
     }
     button:hover:not(:disabled) {
@@ -361,18 +369,18 @@
       box-shadow: none;
     }
     button.secondary {
-      background: rgba(37,39,39,.92);
+      background: rgba(18,19,19,.98);
       color: var(--text);
       border-color: var(--border);
       box-shadow: none;
     }
     button.secondary:hover:not(:disabled) {
-      background: rgba(42,44,44,.96);
-      border-color: rgba(204,255,0,.24);
+      background: rgba(24,26,26,.98);
+      border-color: rgba(204,255,0,.28);
     }
     button.danger {
-      background: rgba(250,80,0,.12);
-      color: #ff8752;
+      background: rgba(46,20,11,.98);
+      color: #ff9360;
       border-color: rgba(250,80,0,.35);
       box-shadow: none;
     }
@@ -381,7 +389,7 @@
       color: #050505;
     }
     button.warn {
-      background: rgba(60,255,225,.12);
+      background: rgba(14,33,29,.98);
       color: var(--accent-2);
       border-color: rgba(60,255,225,.24);
       box-shadow: none;
@@ -389,20 +397,20 @@
     .portfolio-cta {
       flex: 1 1 100%;
       min-height: 52px;
-      background: linear-gradient(135deg, #ccff00 0%, #8dff2d 100%);
+      background: #ccff00;
       color: #050505;
-      border-color: rgba(204,255,0,.55);
-      box-shadow: 0 0 0 1px rgba(204,255,0,.16), 0 16px 30px rgba(204,255,0,.22);
+      border-color: rgba(204,255,0,.72);
+      box-shadow: none;
       font-size: 15px;
       font-weight: 800;
-      letter-spacing: .02em;
+      letter-spacing: .08em;
     }
     .portfolio-cta:hover:not(:disabled) {
-      background: linear-gradient(135deg, #d8ff45 0%, #98ff3c 100%);
+      background: #d7ff38;
       border-color: rgba(204,255,0,.72);
     }
     .portfolio-cta:disabled {
-      background: linear-gradient(135deg, rgba(204,255,0,.18), rgba(141,255,45,.14));
+      background: rgba(204,255,0,.16);
       color: rgba(245,247,247,.72);
       border-color: rgba(204,255,0,.18);
       box-shadow: none;
@@ -413,12 +421,12 @@
       gap: 10px;
       border: 1px solid var(--border);
       padding: 12px 14px;
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       font-size: 13px;
       color: var(--text-soft);
       min-width: 0;
       min-height: 48px;
-      background: rgba(18,18,18,.78);
+      background: rgba(14,15,15,.92);
     }
     .dot {
       width: 10px;
@@ -438,9 +446,9 @@
     .stat > div {
       position: relative;
       overflow: hidden;
-      background: linear-gradient(180deg, rgba(18,18,18,.88), rgba(29,30,30,.82));
+      background: linear-gradient(180deg, rgba(14,15,15,.96), rgba(20,22,22,.9));
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       padding: 14px;
     }
     .stat > div::before {
@@ -475,9 +483,9 @@
       position: relative;
       overflow: hidden;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius-sm);
       padding: 14px;
-      background: linear-gradient(180deg, rgba(15,15,15,.96), rgba(23,24,24,.92));
+      background: linear-gradient(180deg, rgba(14,15,15,.98), rgba(19,21,21,.96));
       cursor: pointer;
       transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
     }
@@ -492,8 +500,8 @@
     }
     .market-snapshot.active {
       border-color: rgba(204,255,0,.38);
-      box-shadow: 0 0 0 1px rgba(204,255,0,.08), 0 10px 24px rgba(0,0,0,.18);
-      background: linear-gradient(180deg, rgba(21,24,16,.98), rgba(24,27,22,.94));
+      box-shadow: inset 0 0 0 1px rgba(204,255,0,.1);
+      background: linear-gradient(180deg, rgba(23,26,17,.98), rgba(18,20,16,.96));
     }
     .market-snapshot-head {
       display: flex;
@@ -560,20 +568,20 @@
       line-height: 1.35;
     }
     .wide { grid-column: 1 / -1; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #log {
-      background: linear-gradient(180deg, rgba(10,10,10,.96), rgba(18,18,18,.96));
+      background: linear-gradient(180deg, rgba(9,10,10,.98), rgba(12,13,13,.99));
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       padding: 14px;
       min-height: 400px;
       max-height: 540px;
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
-      line-height: 1.5;
+      line-height: 1.45;
       color: #d3d7d7;
     }
     .log-line {
@@ -631,7 +639,7 @@
       font-size: 11px;
       letter-spacing: .08em;
       text-transform: uppercase;
-      background: rgba(18,18,18,.75);
+      background: rgba(12,13,13,.88);
     }
     tbody tr:hover td {
       background: rgba(37,39,39,.46);
@@ -644,9 +652,9 @@
     }
     .collapse {
       margin-top: 14px;
-      border: 1px solid rgba(255,255,255,.06);
-      border-radius: 10px;
-      background: linear-gradient(180deg, rgba(18,18,18,.62), rgba(29,30,30,.5));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: linear-gradient(180deg, rgba(14,15,15,.88), rgba(19,20,20,.84));
       overflow: hidden;
     }
     .collapse summary {
@@ -659,7 +667,8 @@
       color: var(--text-soft);
       font-size: 13px;
       font-weight: 700;
-      letter-spacing: .04em;
+      letter-spacing: .06em;
+      text-transform: uppercase;
       cursor: pointer;
       user-select: none;
     }
@@ -675,7 +684,7 @@
       text-transform: uppercase;
     }
     .collapse[open] summary {
-      border-bottom: 1px solid rgba(255,255,255,.06);
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
     .collapse[open] summary::after {
       content: "收起";
@@ -942,11 +951,11 @@
           </div>
           <div>
             <label>止盈 RR 倍数</label>
-            <input id="tpRr" type="number" step="0.1" value="2.2" />
+            <input id="tpRr" type="number" step="0.1" value="2.0" />
           </div>
           <div>
             <label>最大持仓分钟</label>
-            <input id="maxHoldMins" type="number" step="1" value="60" />
+            <input id="maxHoldMins" type="number" step="1" value="30" />
           </div>
         </div>
         <div class="row-3">
