@@ -3139,11 +3139,44 @@
     return Number(formatUnits(position.qty, 10));
   }
 
+  function getPositionMarginUsd(position) {
+    const primary = Number(formatUnits(position.margin || 0n, COLLATERAL_DECIMALS));
+    if (Number.isFinite(primary) && primary >= 0.01) return primary;
+    const legacy = Number(formatUnits(position.margin || 0n, 6));
+    return Number.isFinite(legacy) ? legacy : primary;
+  }
+
   function estimatePositionGrossPnlUsd(position, markPrice) {
     const entryPrice = getPositionEntryPrice(position);
     const qtyBase = getPositionQtyBase(position);
     if (!Number.isFinite(entryPrice) || !Number.isFinite(qtyBase) || !Number.isFinite(markPrice)) return NaN;
     return (position.isLong ? markPrice - entryPrice : entryPrice - markPrice) * qtyBase;
+  }
+
+  function estimatePositionPnlPct(position, markPrice) {
+    const pnlUsd = estimatePositionGrossPnlUsd(position, markPrice);
+    const marginUsd = getPositionMarginUsd(position);
+    if (!Number.isFinite(pnlUsd) || !Number.isFinite(marginUsd) || marginUsd <= 0) return NaN;
+    return pnlUsd / marginUsd * 100;
+  }
+
+  function formatSignedValue(value, formatter) {
+    if (!Number.isFinite(value)) return '-';
+    const abs = formatter(Math.abs(value));
+    return `${value >= 0 ? '+' : '-'}${abs}`;
+  }
+
+  function buildCloseLogSummary(position, { reason = '', markPrice = NaN, estPnlUsd = NaN, estPnlPct = NaN } = {}) {
+    const market = position.market || resolveSymbolFromPairBase(position.pairBase);
+    const side = position.isLong ? 'LONG' : 'SHORT';
+    const pnlUsd = Number.isFinite(estPnlUsd) ? estPnlUsd : estimatePositionGrossPnlUsd(position, markPrice);
+    const pnlPct = Number.isFinite(estPnlPct) ? estPnlPct : estimatePositionPnlPct(position, markPrice);
+    const pnlLabel = Number.isFinite(pnlUsd)
+      ? `${formatSignedValue(pnlUsd, formatStatUsd)}U${Number.isFinite(pnlPct) ? ` / ${formatSignedValue(pnlPct, value => value.toFixed(2))}%` : ''}`
+      : '-';
+    const markLabel = Number.isFinite(markPrice) ? formatPrice(markPrice) : '-';
+    const reasonLabel = reason || '手动平仓';
+    return `${market} ${side} 原因=${reasonLabel} 估算PnL=${pnlLabel} 当前价=${markLabel}`;
   }
 
   function summarizeExistingPositions(positions) {
@@ -3342,11 +3375,17 @@
         if (closeDecision.shouldClose) {
           log(`触发平仓条件: ${market} position=${position.positionHash} ${closeDecision.reason}`);
           const closeRes = await sendClosePosition(position.positionHash);
-          log('已发送平仓请求:', JSON.stringify(closeRes));
+          log(`已发送平仓请求: ${buildCloseLogSummary(position, {
+            reason: closeDecision.reason,
+            markPrice: marketEntry.sig.price
+          })}`, JSON.stringify(closeRes));
           if (closeRes.input_hash) {
             const rawStatus = await waitExecution(closeRes.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
             const status = normalizeExecutionStatus(rawStatus);
-            log('平仓状态:', JSON.stringify(status));
+            log(`平仓状态: ${buildCloseLogSummary(position, {
+              reason: closeDecision.reason,
+              markPrice: marketEntry.sig.price
+            })}`, JSON.stringify(status));
             if (status.executed && !status.success) {
               throw new Error(getExecutionFailureReason(status));
             }
@@ -3666,13 +3705,21 @@
         );
         try {
           const res = await sendClosePosition(winner.position.positionHash);
-          log(`盈利仓位平仓已发送: ${winner.market}`, JSON.stringify(res));
+          log(`盈利仓位平仓已发送: ${buildCloseLogSummary(winner.position, {
+            reason: '一键平盈利仓位',
+            markPrice: winner.markPrice,
+            estPnlUsd: winner.estPnlUsd
+          })}`, JSON.stringify(res));
           if (!res.input_hash) {
             throw new Error(`盈利仓位平仓请求未返回 input_hash: ${winner.market}`);
           }
           const rawStatus = await waitExecution(res.input_hash).catch(err => ({ executed: true, success: false, reason: err.message }));
           const status = normalizeExecutionStatus(rawStatus);
-          log(`盈利仓位平仓状态: ${winner.market}`, JSON.stringify(status));
+          log(`盈利仓位平仓状态: ${buildCloseLogSummary(winner.position, {
+            reason: '一键平盈利仓位',
+            markPrice: winner.markPrice,
+            estPnlUsd: winner.estPnlUsd
+          })}`, JSON.stringify(status));
           if (status.executed && !status.success) {
             throw new Error(getExecutionFailureReason(status));
           }
@@ -3712,12 +3759,30 @@
     const closeHash = e.target?.dataset?.close;
     if (closeHash) {
       try {
+        const positions = await fetchTrackedPositions();
+        const targetPosition = positions.find(position => String(position.positionHash) === String(closeHash)) || null;
+        let manualMarkPrice = NaN;
+        if (targetPosition) {
+          try {
+            const market = targetPosition.market || resolveSymbolFromPairBase(targetPosition.pairBase);
+            const marketEntry = await ensureMarketEntry(market, { force: true });
+            manualMarkPrice = marketEntry?.sig?.price;
+          } catch (priceError) {
+            log('手动平仓估值失败，不影响继续平仓:', getErrorMessage(priceError));
+          }
+        }
         const res = await sendClosePosition(closeHash);
-        log('手动平仓已发送:', JSON.stringify(res));
+        log(`手动平仓已发送: ${targetPosition ? buildCloseLogSummary(targetPosition, {
+          reason: '手动点击平仓',
+          markPrice: manualMarkPrice
+        }) : `position=${closeHash}`}`, JSON.stringify(res));
         if (res.input_hash) {
           const rawStatus = await waitExecution(res.input_hash).catch(err => ({ executed: true, success: false, reason: err.message }));
           const status = normalizeExecutionStatus(rawStatus);
-          log('手动平仓状态:', JSON.stringify(status));
+          log(`手动平仓状态: ${targetPosition ? buildCloseLogSummary(targetPosition, {
+            reason: '手动点击平仓',
+            markPrice: manualMarkPrice
+          }) : `position=${closeHash}`}`, JSON.stringify(status));
           if (status.executed && !status.success) {
             throw new Error(getExecutionFailureReason(status));
           }
