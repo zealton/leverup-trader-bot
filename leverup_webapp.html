@@ -444,6 +444,100 @@
       font-weight: 800;
       color: var(--text);
     }
+    .market-snapshot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .market-snapshot {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      background: linear-gradient(180deg, rgba(15,15,15,.96), rgba(23,24,24,.92));
+      cursor: pointer;
+      transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    .market-snapshot::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(204,255,0,.34), transparent 72%);
+      opacity: .75;
+    }
+    .market-snapshot.active {
+      border-color: rgba(204,255,0,.38);
+      box-shadow: 0 0 0 1px rgba(204,255,0,.08), 0 10px 24px rgba(0,0,0,.18);
+      background: linear-gradient(180deg, rgba(21,24,16,.98), rgba(24,27,22,.94));
+    }
+    .market-snapshot-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .market-snapshot-symbol {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+    .market-snapshot-focus {
+      margin-top: 3px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .market-snapshot-signal {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-soft);
+      white-space: nowrap;
+    }
+    .market-snapshot-signal.long {
+      color: #93ffad;
+    }
+    .market-snapshot-signal.short {
+      color: #ff9c73;
+    }
+    .market-snapshot-signal.flat {
+      color: var(--muted);
+    }
+    .market-snapshot-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 12px;
+      margin-top: 14px;
+    }
+    .market-snapshot-meta span {
+      display: block;
+      min-width: 0;
+    }
+    .market-snapshot-meta strong {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .market-snapshot-meta em {
+      display: block;
+      font-style: normal;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.35;
+    }
     .wide { grid-column: 1 / -1; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #log {
@@ -888,18 +982,12 @@
           开仓如果因为可接受成交价过严被拒，会自动逐步上调滑点，最高尝试到 5%。
         </div>
 
-        <div class="stat">
-          <div><div class="k">15m 信号</div><div id="signal15" class="v">-</div></div>
-          <div><div class="k">4h 趋势</div><div id="signal4h" class="v">-</div></div>
-          <div><div class="k">参考价格</div><div id="lastPrice" class="v">-</div></div>
-          <div><div class="k">ATR(15m)</div><div id="lastAtr" class="v">-</div></div>
-          <div><div class="k">自动杠杆</div><div id="autoLeverage" class="v">-</div></div>
-        </div>
+        <div id="marketSnapshots" class="market-snapshot-grid"></div>
 
         <div class="row" style="margin-top:14px;">
           <div>
             <label>信号诊断</label>
-            <textarea id="signalDiag" readonly placeholder="运行一次策略后显示本轮 LONG / SHORT 诊断"></textarea>
+            <textarea id="signalDiag" readonly placeholder="运行一次策略后显示当前手动标的的 LONG / SHORT 诊断"></textarea>
           </div>
         </div>
       </div>
@@ -1247,12 +1335,14 @@
       ...payload
     };
     persistPendingOpenState();
+    updateFocusedSignalPanel();
   }
 
   function clearPendingOpen(symbol) {
     if (!state.pendingOpenBySymbol[symbol]) return;
     delete state.pendingOpenBySymbol[symbol];
     persistPendingOpenState();
+    updateFocusedSignalPanel();
   }
 
   function getPendingOpenLabel(symbol) {
@@ -2051,6 +2141,52 @@
     return v >= 1000 ? v.toFixed(2) : v.toFixed(4);
   }
 
+  function getSignalToneClass(signal) {
+    if (signal === 'LONG') return 'long';
+    if (signal === 'SHORT') return 'short';
+    return 'flat';
+  }
+
+  function renderMarketSnapshots() {
+    if (!els.marketSnapshots) return;
+    const focusSymbol = getFocusSymbol();
+    const leverageCap = getRiskInputs().leverageCap;
+    const cards = getTrackedSymbols().map(symbol => {
+      const entry = state.latestBySymbol[symbol];
+      const sig = entry?.sig;
+      const filteredSignal = entry?.filteredSignal || 'FLAT';
+      const signalLabel = sig?.signal || 'FLAT';
+      const leverageDecision = entry?.leverageDecision || (
+        sig && (filteredSignal === 'LONG' || filteredSignal === 'SHORT')
+          ? pickAutoLeverage(filteredSignal, sig, Math.min(leverageCap, getSymbolMaxLeverage(symbol)))
+          : null
+      );
+      const leverageText = leverageDecision ? `${leverageDecision.leverage.toFixed(0)}x` : '-';
+      const pendingLabel = getPendingOpenLabel(symbol);
+      const scoreText = Number.isFinite(entry?.score) && filteredSignal !== 'FLAT' ? entry.score.toFixed(1) : '-';
+      return `
+        <div class="market-snapshot${symbol === focusSymbol ? ' active' : ''}" data-symbol="${symbol}">
+          <div class="market-snapshot-head">
+            <div>
+              <div class="market-snapshot-symbol">${symbol}</div>
+              <div class="market-snapshot-focus">${symbol === focusSymbol ? '当前手动标的' : '点击切换诊断'}</div>
+            </div>
+            <div class="market-snapshot-signal ${getSignalToneClass(filteredSignal)}">${pendingLabel ? `${filteredSignal} · ${pendingLabel}` : filteredSignal}</div>
+          </div>
+          <div class="market-snapshot-meta">
+            <span><strong>原始信号</strong><em>${signalLabel}</em></span>
+            <span><strong>4h 趋势</strong><em>${sig?.trend || '-'}</em></span>
+            <span><strong>参考价格</strong><em>${formatPrice(sig?.price)}</em></span>
+            <span><strong>ATR(15m)</strong><em>${formatPrice(sig?.atr)}</em></span>
+            <span><strong>自动杠杆</strong><em>${leverageText}</em></span>
+            <span><strong>信号评分</strong><em>${scoreText}</em></span>
+          </div>
+        </div>
+      `;
+    });
+    els.marketSnapshots.innerHTML = cards.join('');
+  }
+
   function buildDirectionalFailureReasons(sig, side) {
     const d = sig.diag;
     if (!d) return [];
@@ -2098,7 +2234,7 @@
   function renderSignalDiagnostics(sig, filteredSignal, symbol = getFocusSymbol()) {
     if (!els.signalDiag) return;
     if (!sig?.diag) {
-      els.signalDiag.value = '运行一次策略后显示诊断';
+      els.signalDiag.value = '运行一次策略后显示当前手动标的的诊断';
       return;
     }
     const d = sig.diag;
@@ -2159,23 +2295,14 @@
   }
 
   function updateFocusedSignalPanel() {
+    renderMarketSnapshots();
     const symbol = getFocusSymbol();
     const entry = state.latestBySymbol[symbol];
     if (!entry) {
-      els.signal15.textContent = '-';
-      els.signal4h.textContent = '-';
-      els.lastPrice.textContent = '-';
-      els.lastAtr.textContent = '-';
-      els.autoLeverage.textContent = '-';
-      if (els.signalDiag) els.signalDiag.value = '运行一次策略后显示诊断';
+      if (els.signalDiag) els.signalDiag.value = '运行一次策略后显示当前手动标的的诊断';
       return;
     }
-    const { sig, filteredSignal, leverageDecision } = entry;
-    els.signal15.textContent = `${symbol} ${sig.signal}`;
-    els.signal4h.textContent = `${symbol} ${sig.trend}`;
-    els.lastPrice.textContent = formatPrice(sig.price);
-    els.lastAtr.textContent = formatPrice(sig.atr);
-    els.autoLeverage.textContent = leverageDecision ? `${leverageDecision.leverage.toFixed(0)}x` : '-';
+    const { sig, filteredSignal } = entry;
     renderSignalDiagnostics(sig, filteredSignal, symbol);
   }
 
@@ -2959,6 +3086,15 @@
   }
 
   document.addEventListener('click', async (e) => {
+    const snapshot = e.target?.closest?.('[data-symbol]');
+    if (snapshot?.dataset?.symbol && cfg().symbols[snapshot.dataset.symbol]) {
+      if (els.manualSymbol.value !== snapshot.dataset.symbol) {
+        els.manualSymbol.value = snapshot.dataset.symbol;
+        updateManualLeverageBounds();
+      }
+      updateFocusedSignalPanel();
+      return;
+    }
     const closeHash = e.target?.dataset?.close;
     if (closeHash) {
       try {
@@ -3051,6 +3187,7 @@
   updateAuthorizationBadge();
   updateStatusPanel();
   updatePortfolioEntry();
+  updateFocusedSignalPanel();
   log('页面已加载。先连接 MetaMask，再用 MetaMask 授权当前本地 Agent。');
 </script>
 </body>
