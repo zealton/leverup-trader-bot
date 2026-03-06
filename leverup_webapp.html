@@ -2491,6 +2491,42 @@
     return reasons;
   }
 
+  function buildDirectionalFailureLabels(sig, side) {
+    const d = sig.diag;
+    if (!d) return [];
+    const aggressive = d.entryMode === 'aggressive';
+    if (side === 'LONG') {
+      const labels = [];
+      if (!d.trendUpSoft) labels.push('4h 还不是多头趋势');
+      if (aggressive) {
+        if (!d.closeNearAboveEma) labels.push('15m 收盘还没站上 EMA20');
+        if (!d.ema20SupportiveLong) labels.push('15m EMA20 还没转强');
+        if (!d.aggressiveLongTrigger) labels.push('没有出现回踩/突破/站回/续涨触发');
+      } else {
+        if (!d.longTouchEma) labels.push('15m 没有回踩 EMA20');
+        if (!d.longBreakout) labels.push('15m 没有突破前高');
+      }
+      return labels;
+    }
+    const labels = [];
+    if (!d.trendDownSoft) labels.push('4h 还不是空头趋势');
+    if (aggressive) {
+      if (!d.closeNearBelowEma) labels.push('15m 收盘还没跌回 EMA20 下方');
+      if (!d.ema20SupportiveShort) labels.push('15m EMA20 还没转弱');
+      if (!d.aggressiveShortTrigger) labels.push('没有出现回抽/跌破/失守/续跌触发');
+    } else {
+      if (!d.shortTouchEma) labels.push('15m 没有回抽 EMA20');
+      if (!d.shortBreakdown) labels.push('15m 没有跌破前低');
+    }
+    return labels;
+  }
+
+  function summarizeDirectionalFailure(sig, side) {
+    const labels = buildDirectionalFailureLabels(sig, side);
+    if (!labels.length) return side === 'LONG' ? '偏多条件已齐' : '偏空条件已齐';
+    return labels.slice(0, 2).join('，');
+  }
+
   function summarizeSignalDecision(sig, filteredSignal) {
     if (!sig?.diag) return '诊断数据未就绪';
     if (sig.signal !== 'FLAT' && filteredSignal === 'FLAT') {
@@ -2498,11 +2534,11 @@
       return `原始信号 ${sig.signal}，但已被方向过滤（当前设置：${modeLabel}）`;
     }
     if (filteredSignal === 'LONG' || filteredSignal === 'SHORT') {
-      return `原始信号 ${sig.signal}，满足 ${filteredSignal} 条件`;
+      return `当前可进场：${filteredSignal}`;
     }
-    const longReasons = buildDirectionalFailureReasons(sig, 'LONG');
-    const shortReasons = buildDirectionalFailureReasons(sig, 'SHORT');
-    return `LONG 缺失: ${longReasons.join('；')} | SHORT 缺失: ${shortReasons.join('；')}`;
+    const longSummary = summarizeDirectionalFailure(sig, 'LONG');
+    const shortSummary = summarizeDirectionalFailure(sig, 'SHORT');
+    return `当前观望。偏多未确认：${longSummary}；偏空未确认：${shortSummary}`;
   }
 
   function renderSignalDiagnostics(sig, filteredSignal, symbol = getFocusSymbol()) {
