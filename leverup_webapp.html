@@ -1156,6 +1156,7 @@
   const MIN_MARGIN_USDC = 10;
   const MIN_NOTIONAL_USD = 200;
   const MAX_SYMBOL_LEVERAGE = 100;
+  const POSITION_BUFFER_THRESHOLD = 0.005;
   const MIN_AUTO_LEVERAGE = 10;
   const AUTO_LEVERAGE_STEP = 5;
   const AUTO_RISK_BUDGET_TOLERANCE_MULTIPLIER = 1.35;
@@ -2848,12 +2849,17 @@
     });
   }
 
-  async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit, slippagePct = getConfiguredSlippagePct() }) {
+  async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit, leverage, slippagePct = getConfiguredSlippagePct() }) {
     assertTradingReady();
     await assertCollateralReady(margin);
     const pairBase = cfg().symbols[symbol].pairBase;
     const amountIn = parseUnits(String(margin.toFixed(COLLATERAL_DECIMALS)), COLLATERAL_DECIMALS);
-    const qty = BigInt(Math.floor(qtyBase * 1e10));
+    const symbolMaxLeverage = getSymbolMaxLeverage(symbol);
+    const reachMaxLeverage = Number.isFinite(leverage) && leverage >= symbolMaxLeverage - 1e-9;
+    const countableQtyBase = reachMaxLeverage
+      ? qtyBase * (1 - POSITION_BUFFER_THRESHOLD)
+      : qtyBase;
+    const qty = BigInt(Math.floor(countableQtyBase * 1e10));
     const side = isLong ? 'LONG' : 'SHORT';
     const acceptablePrice = getAcceptablePrice(side, price, slippagePct);
     const px = parseUnits(String(acceptablePrice.toFixed(8)), 18);
@@ -2894,7 +2900,10 @@
       pythUpdateData
     };
 
-    log(`准备发送开仓: side=${side} ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${slippagePct.toFixed(1)}%`);
+    if (reachMaxLeverage) {
+      log(`${symbol} 命中 ${symbolMaxLeverage}x 最大杠杆档，按官方 0.5% safety buffer 下调开仓数量`);
+    }
+    log(`准备发送开仓: side=${side} lev=${Number.isFinite(leverage) ? leverage.toFixed(0) : '-'}x ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${slippagePct.toFixed(1)}%`);
     const url = `${cfg().keeperUrl}/v1/trading/send-open-position?blockchain=MONAD`;
     const res = await fetch(url, {
       method: 'POST',
@@ -3200,7 +3209,8 @@
             qtyBase: plan.qtyBase,
             price: entry.sig.price,
             stopLoss: plan.stopLoss,
-            takeProfit: plan.takeProfit
+            takeProfit: plan.takeProfit,
+            leverage: plan.leverage
           });
           log(`已发送开仓请求: ${entry.symbol} ${entry.filteredSignal}`, JSON.stringify(openRes));
           if (openRes.input_hash) {
@@ -3314,7 +3324,8 @@
         qtyBase: plan.qtyBase,
         price: sig.price,
         stopLoss: plan.stopLoss,
-        takeProfit: plan.takeProfit
+        takeProfit: plan.takeProfit,
+        leverage: plan.leverage
       });
       log('手动开仓已发送:', JSON.stringify(res));
       if (res.input_hash) {
