@@ -635,14 +635,6 @@
               <option value="testnet">Monad Testnet</option>
             </select>
           </div>
-          <div>
-            <label>查看 / 手动标的</label>
-            <select id="symbol">
-              <option value="BTC">BTC</option>
-              <option value="ETH">ETH</option>
-              <option value="SOL">SOL</option>
-            </select>
-          </div>
         </div>
 
         <div class="row">
@@ -807,7 +799,7 @@
 
         <div class="note">
           BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
-          Bot 现在会固定扫描 BTC / ETH / SOL 三个市场；这里的标的选择主要用于手动交易、信号诊断和界面聚焦显示。
+          Bot 现在会固定扫描 BTC / ETH / SOL 三个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           自动杠杆不会固定写死；Bot 会按 15m 波动和 4h 趋势强弱，在 10x 到你设定上限之间动态挑选实际杠杆。
@@ -835,6 +827,14 @@
       <div class="card" id="manualCard">
         <h2>手动交易</h2>
         <div class="row-3">
+          <div>
+            <label>手动交易标的</label>
+            <select id="manualSymbol">
+              <option value="BTC">BTC</option>
+              <option value="ETH">ETH</option>
+              <option value="SOL">SOL</option>
+            </select>
+          </div>
           <div>
             <label>方向</label>
             <select id="manualSide">
@@ -1054,7 +1054,7 @@
   }
 
   function getFocusSymbol() {
-    return cfg().symbols[els.symbol.value] ? els.symbol.value : getTrackedSymbols()[0];
+    return cfg().symbols[els.manualSymbol.value] ? els.manualSymbol.value : getTrackedSymbols()[0];
   }
 
   function getSymbolConfig(symbol) {
@@ -2438,7 +2438,7 @@
   els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
   els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
   els.stopBtn.addEventListener('click', stopBot);
-  els.symbol.addEventListener('change', updateFocusedSignalPanel);
+  els.manualSymbol.addEventListener('change', updateFocusedSignalPanel);
   els.openPortfolioBtn.addEventListener('click', () => {
     const url = getPortfolioUrl();
     if (!url) {
