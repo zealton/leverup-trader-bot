@@ -1007,6 +1007,7 @@
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           当前默认风控也偏向“少跳过、多出手”：单笔风险默认 3.0%，止损默认 1.2 ATR，自动计划器允许在预算附近做适度超配。
+          已有仓位现在会启用 Bot 侧动态止损：浮盈到 1R 自动提到保本，浮盈到 1.5R 后改为 0.8 ATR 追踪止损。
           自动杠杆不会固定写死；Bot 会按 15m 波动和 4h 趋势强弱，在 10x 到你设定上限之间动态挑选实际杠杆。
           开仓如果因为可接受成交价过严被拒，会自动逐步上调滑点，最高尝试到 5%。
         </div>
@@ -1154,6 +1155,9 @@
   const AUTO_LEVERAGE_STEP = 5;
   const AUTO_RISK_BUDGET_TOLERANCE_MULTIPLIER = 1.35;
   const AUTO_RISK_BUDGET_TOLERANCE_ABS_USD = 0.35;
+  const DYNAMIC_STOP_BREAK_EVEN_TRIGGER_R = 1;
+  const DYNAMIC_STOP_TRAILING_TRIGGER_R = 1.5;
+  const DYNAMIC_STOP_TRAILING_ATR = 0.8;
   const EXECUTION_FEE_USD = 0;
   const OPEN_FEE_RATE = 7 / 10000;
   const MIN_NOTIONAL_CHECK_BUFFER = 0.005;
@@ -1284,6 +1288,7 @@
     lastAction: localStorage.getItem('leverup_lastAction') || '-',
     lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0'),
     pendingOpenBySymbol: {},
+    dynamicStopByPosition: {},
     strategyInFlight: false
   };
 
@@ -1331,6 +1336,11 @@
     return `leverup_pending_open_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
   }
 
+  function getDynamicStopStorageKey() {
+    if (!state.traderAddress) return '';
+    return `leverup_dynamic_stop_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
+  }
+
   function persistPendingOpenState() {
     const key = getPendingOpenStorageKey();
     if (!key) return;
@@ -1353,6 +1363,43 @@
       }
     }
     if (changed) persistPendingOpenState();
+  }
+
+  function persistDynamicStopState() {
+    const key = getDynamicStopStorageKey();
+    if (!key) return;
+    const entries = Object.entries(state.dynamicStopByPosition || {});
+    if (!entries.length) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  }
+
+  function hydrateDynamicStopState() {
+    const key = getDynamicStopStorageKey();
+    if (!key) {
+      state.dynamicStopByPosition = {};
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(key);
+      state.dynamicStopByPosition = raw ? JSON.parse(raw) : {};
+    } catch {
+      state.dynamicStopByPosition = {};
+    }
+  }
+
+  function pruneDynamicStops(activePositionHashes = []) {
+    const active = new Set(activePositionHashes.map(hash => String(hash)));
+    let changed = false;
+    for (const hash of Object.keys(state.dynamicStopByPosition || {})) {
+      if (!active.has(hash)) {
+        delete state.dynamicStopByPosition[hash];
+        changed = true;
+      }
+    }
+    if (changed) persistDynamicStopState();
   }
 
   function hydratePendingOpenState() {
@@ -1393,6 +1440,12 @@
     if (pending.status === 'submitting') return '提交中';
     if (pending.inputHash) return `${pending.inputHash.slice(0, 10)}...`;
     return '待确认';
+  }
+
+  function getDynamicStopModeLabel(mode) {
+    if (mode === 'trail') return 'ATR 追踪';
+    if (mode === 'breakeven') return '保本';
+    return '静态';
   }
 
   function formatCollateralDisplay(amount) {
@@ -1882,10 +1935,12 @@
     });
     if (state.traderAddress) {
       hydratePendingOpenState();
+      hydrateDynamicStopState();
       refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e)));
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('刷新 LVUSD 状态失败:', getErrorMessage(e)));
     } else {
       state.pendingOpenBySymbol = {};
+      state.dynamicStopByPosition = {};
       updateCollateralStatusUi({ note: '未连接' });
     }
   }
@@ -2136,6 +2191,7 @@
     ensureLocalAgent();
     hydrateKnownAuthorizationFromCache();
     hydratePendingOpenState();
+    hydrateDynamicStopState();
     setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
     log('已连接 MetaMask:', address);
     refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
@@ -2958,6 +3014,7 @@
   async function fetchTrackedPositions() {
     if (!state.traderAddress) {
       state.pendingOpenBySymbol = {};
+      state.dynamicStopByPosition = {};
       renderPositions([]);
       els.openCount.textContent = '0';
       return [];
@@ -2973,6 +3030,7 @@
     for (const symbol of symbolsWithPosition) {
       clearPendingOpen(symbol);
     }
+    pruneDynamicStops(positions.map(position => position.positionHash));
     renderPositions(positions);
     els.openCount.textContent = String(positions.length);
     return positions;
@@ -3029,23 +3087,120 @@
     return analyzed;
   }
 
+  function updateDynamicStopForPosition(position, sig, riskInputs) {
+    const positionHash = String(position.positionHash);
+    const entryPrice = getPositionEntryPrice(position);
+    const configuredStopPrice = Number(formatUnits(position.stopLoss || 0n, 18));
+    const markPrice = sig?.price;
+    const atrValue = sig?.atr;
+    if (!Number.isFinite(entryPrice) || !Number.isFinite(markPrice) || !Number.isFinite(atrValue) || atrValue <= 0) {
+      return null;
+    }
+
+    const isLong = !!position.isLong;
+    const prev = state.dynamicStopByPosition[positionHash] || {};
+    const configuredRiskDistance = Number.isFinite(configuredStopPrice) && configuredStopPrice > 0
+      ? Math.abs(entryPrice - configuredStopPrice)
+      : NaN;
+    const activationRiskDistance = Number.isFinite(prev.activationRiskDistance) && prev.activationRiskDistance > 0
+      ? prev.activationRiskDistance
+      : (Number.isFinite(configuredRiskDistance) && configuredRiskDistance > 0
+        ? configuredRiskDistance
+        : atrValue * riskInputs.slAtr);
+    const previousBest = Number.isFinite(prev.bestPrice) ? prev.bestPrice : entryPrice;
+    const bestPrice = isLong ? Math.max(previousBest, markPrice) : Math.min(previousBest, markPrice);
+    const favorableMove = isLong ? bestPrice - entryPrice : entryPrice - bestPrice;
+
+    let mode = prev.mode || 'none';
+    if (mode !== 'trail' && favorableMove >= activationRiskDistance * DYNAMIC_STOP_TRAILING_TRIGGER_R) {
+      mode = 'trail';
+    } else if (mode === 'none' && favorableMove >= activationRiskDistance * DYNAMIC_STOP_BREAK_EVEN_TRIGGER_R) {
+      mode = 'breakeven';
+    }
+
+    let candidateStop = Number.isFinite(prev.stopPrice) ? prev.stopPrice : null;
+    if (mode === 'breakeven') {
+      candidateStop = entryPrice;
+    } else if (mode === 'trail') {
+      const trailingStop = isLong
+        ? bestPrice - atrValue * DYNAMIC_STOP_TRAILING_ATR
+        : bestPrice + atrValue * DYNAMIC_STOP_TRAILING_ATR;
+      candidateStop = isLong ? Math.max(entryPrice, trailingStop) : Math.min(entryPrice, trailingStop);
+    }
+
+    const previousStop = Number.isFinite(prev.stopPrice) ? prev.stopPrice : null;
+    const stopPrice = Number.isFinite(candidateStop)
+      ? (
+        previousStop === null
+          ? candidateStop
+          : (isLong ? Math.max(previousStop, candidateStop) : Math.min(previousStop, candidateStop))
+      )
+      : previousStop;
+
+    const modeChanged = mode !== (prev.mode || 'none');
+    const stopChanged = Number.isFinite(stopPrice) && (!Number.isFinite(prev.stopPrice) || Math.abs(stopPrice - prev.stopPrice) > 1e-8);
+    const bestChanged = Math.abs(bestPrice - previousBest) > 1e-8;
+
+    state.dynamicStopByPosition[positionHash] = {
+      market: position.market || resolveSymbolFromPairBase(position.pairBase),
+      isLong,
+      entryPrice,
+      activationRiskDistance,
+      bestPrice,
+      stopPrice,
+      mode,
+      updatedAt: Date.now()
+    };
+    if (modeChanged || stopChanged || bestChanged) {
+      persistDynamicStopState();
+    }
+
+    const hit = Number.isFinite(stopPrice) && (isLong ? markPrice <= stopPrice : markPrice >= stopPrice);
+    return {
+      mode,
+      stopPrice,
+      bestPrice,
+      activationRiskDistance,
+      hit,
+      changed: modeChanged || stopChanged,
+      markPrice
+    };
+  }
+
   function shouldCloseTrackedPosition(position, sig, filteredSignal, riskInputs) {
-    const entry = Number(formatUnits(position.entryPrice, 18));
+    const entry = getPositionEntryPrice(position);
     const isLong = !!position.isLong;
     const heldMins = (Date.now() / 1000 - Number(position.timestamp)) / 60;
-    return (
-      heldMins >= riskInputs.maxHoldMins ||
-      (isLong && (
-        sig.price <= entry - sig.atr * riskInputs.slAtr ||
-        sig.price >= entry + sig.atr * riskInputs.slAtr * riskInputs.tpRr ||
-        filteredSignal === 'SHORT'
-      )) ||
-      (!isLong && (
-        sig.price >= entry + sig.atr * riskInputs.slAtr ||
-        sig.price <= entry - sig.atr * riskInputs.slAtr * riskInputs.tpRr ||
-        filteredSignal === 'LONG'
-      ))
-    );
+    const dynamicStop = updateDynamicStopForPosition(position, sig, riskInputs);
+    if (heldMins >= riskInputs.maxHoldMins) {
+      return { shouldClose: true, reason: `持仓时长 ${heldMins.toFixed(1)} 分钟 >= ${riskInputs.maxHoldMins} 分钟`, dynamicStop };
+    }
+    if (dynamicStop?.hit) {
+      return {
+        shouldClose: true,
+        reason: `触发${getDynamicStopModeLabel(dynamicStop.mode)}止损 @ ${formatPrice(dynamicStop.stopPrice)}（mark ${formatPrice(dynamicStop.markPrice)}）`,
+        dynamicStop
+      };
+    }
+    if (isLong && sig.price <= entry - sig.atr * riskInputs.slAtr) {
+      return { shouldClose: true, reason: `触发静态止损 @ ${formatPrice(entry - sig.atr * riskInputs.slAtr)}`, dynamicStop };
+    }
+    if (isLong && sig.price >= entry + sig.atr * riskInputs.slAtr * riskInputs.tpRr) {
+      return { shouldClose: true, reason: `触发止盈 @ ${formatPrice(entry + sig.atr * riskInputs.slAtr * riskInputs.tpRr)}`, dynamicStop };
+    }
+    if (isLong && filteredSignal === 'SHORT') {
+      return { shouldClose: true, reason: '出现反向 SHORT 信号', dynamicStop };
+    }
+    if (!isLong && sig.price >= entry + sig.atr * riskInputs.slAtr) {
+      return { shouldClose: true, reason: `触发静态止损 @ ${formatPrice(entry + sig.atr * riskInputs.slAtr)}`, dynamicStop };
+    }
+    if (!isLong && sig.price <= entry - sig.atr * riskInputs.slAtr * riskInputs.tpRr) {
+      return { shouldClose: true, reason: `触发止盈 @ ${formatPrice(entry - sig.atr * riskInputs.slAtr * riskInputs.tpRr)}`, dynamicStop };
+    }
+    if (!isLong && filteredSignal === 'LONG') {
+      return { shouldClose: true, reason: '出现反向 LONG 信号', dynamicStop };
+    }
+    return { shouldClose: false, reason: '', dynamicStop };
   }
 
   async function runStrategyCycle(trigger = 'bot') {
@@ -3098,8 +3253,16 @@
         const market = position.market || resolveSymbolFromPairBase(position.pairBase);
         const marketEntry = state.latestBySymbol[market];
         if (!marketEntry) continue;
-        if (shouldCloseTrackedPosition(position, marketEntry.sig, marketEntry.filteredSignal, r)) {
-          log(`触发平仓条件: ${market} position=${position.positionHash}`);
+        const closeDecision = shouldCloseTrackedPosition(position, marketEntry.sig, marketEntry.filteredSignal, r);
+        if (closeDecision.dynamicStop?.changed && closeDecision.dynamicStop.mode !== 'none') {
+          log(
+            `${market} 动态止损更新: ${getDynamicStopModeLabel(closeDecision.dynamicStop.mode)} ` +
+            `@ ${formatPrice(closeDecision.dynamicStop.stopPrice)} / best ${formatPrice(closeDecision.dynamicStop.bestPrice)} / ` +
+            `mark ${formatPrice(closeDecision.dynamicStop.markPrice)}`
+          );
+        }
+        if (closeDecision.shouldClose) {
+          log(`触发平仓条件: ${market} position=${position.positionHash} ${closeDecision.reason}`);
           const closeRes = await sendClosePosition(position.positionHash);
           log('已发送平仓请求:', JSON.stringify(closeRes));
           if (closeRes.input_hash) {
@@ -3112,6 +3275,8 @@
           } else {
             throw new Error('keeper 未返回 input_hash，无法确认平仓执行状态');
           }
+          delete state.dynamicStopByPosition[String(position.positionHash)];
+          persistDynamicStopState();
           state.lastAction = `平仓 ${market}`;
           state.lastTradeTs = Date.now();
           closedAny = true;
@@ -3433,6 +3598,8 @@
           if (status.executed && !status.success) {
             throw new Error(getExecutionFailureReason(status));
           }
+          delete state.dynamicStopByPosition[String(winner.position.positionHash)];
+          persistDynamicStopState();
           state.lastAction = `盈利平仓 ${winner.market}`;
           state.lastTradeTs = Date.now();
           closedCount += 1;
@@ -3476,6 +3643,8 @@
           if (status.executed && !status.success) {
             throw new Error(getExecutionFailureReason(status));
           }
+          delete state.dynamicStopByPosition[String(closeHash)];
+          persistDynamicStopState();
         } else {
           throw new Error(`手动平仓请求未返回 input_hash: ${closeHash}`);
         }
@@ -3540,6 +3709,7 @@
         updatePortfolioEntry();
         updateCollateralStatusUi({ note: '未连接' });
         state.pendingOpenBySymbol = {};
+        state.dynamicStopByPosition = {};
         state.agentAuthorized = false;
         state.currentAuthorizedAgent = ZERO_ADDRESS;
         state.authStatusNote = '';
@@ -3559,6 +3729,7 @@
       els.traderAddress.value = address;
       updatePortfolioEntry();
       hydratePendingOpenState();
+      hydrateDynamicStopState();
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
       setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
       refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
