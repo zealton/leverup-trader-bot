@@ -1,0 +1,1694 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeverUp Trader Console</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #11182d;
+      --panel-2: #16213b;
+      --text: #e8eefc;
+      --muted: #9fb0d0;
+      --accent: #6ea8fe;
+      --good: #4ade80;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --border: rgba(255,255,255,.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #0b1020 0%, #08101b 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1380px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p.sub { margin: 0; color: var(--muted); max-width: 920px; line-height: 1.5; }
+    .status-row {
+      margin-top: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 16px;
+      margin-top: 22px;
+    }
+    .card {
+      background: rgba(17,24,45,.9);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.28);
+      backdrop-filter: blur(10px);
+      min-width: 0;
+    }
+    .card h2 { margin: 0 0 14px; font-size: 17px; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .row-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 12px; }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: #0c1430;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 11px 12px;
+      outline: none;
+    }
+    textarea { min-height: 86px; resize: vertical; }
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .btns > button { flex: 1 1 180px; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      background: var(--accent);
+      color: #07101f;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    button.secondary { background: #1d2a4a; color: var(--text); }
+    button.danger { background: var(--bad); color: #fff; }
+    button.good { background: var(--good); color: #08120d; }
+    button.warn { background: var(--warn); color: #231800; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 0;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+    .dot.ok { background: var(--good); }
+    .dot.bad { background: var(--bad); }
+    .stat {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .stat > div {
+      background: #0b1430;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .k { color: var(--muted); font-size: 12px; }
+    .v { margin-top: 6px; font-size: 18px; font-weight: 700; }
+    .wide { grid-column: 1 / -1; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #log {
+      background: #071126;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      min-height: 380px;
+      max-height: 520px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .note {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+    .full {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .stack-section {
+      margin-top: 16px;
+    }
+    @media (max-width: 1360px) {
+      .wrap { padding: 18px; }
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .grid > .card:first-child {
+        grid-column: 1 / -1;
+      }
+    }
+    @media (max-width: 1240px) {
+      .full { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 1100px) {
+      .grid, .full { grid-template-columns: 1fr; }
+      .grid > .card:first-child { grid-column: auto; }
+    }
+    @media (max-width: 720px) {
+      .wrap { padding: 14px; }
+      h1 { font-size: 24px; }
+      .card { padding: 14px; }
+      .btns > button { flex-basis: 100%; }
+      .row, .row-3, .stat { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>LeverUp 自动交易网页工具</h1>
+    <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL 策略执行</p>
+
+    <div class="status-row">
+      <span class="badge"><span id="mmDot" class="dot"></span> MetaMask: <span id="mmStatus">未连接</span></span>
+      <span class="badge"><span id="sessDot" class="dot"></span> Local Agent: <span id="sessStatus">未就绪</span></span>
+      <span class="badge"><span id="authDot" class="dot"></span> Agent 授权: <span id="authStatus">未检查</span></span>
+      <span class="badge"><span id="botDot" class="dot"></span> Bot: <span id="botStatus">已停止</span></span>
+    </div>
+
+    <div class="full">
+      <div class="card">
+        <h2>运行日志</h2>
+        <div id="log"></div>
+      </div>
+      <div class="card">
+        <h2>连接与网络</h2>
+        <div class="row">
+          <div>
+            <label>网络</label>
+            <select id="network">
+              <option value="mainnet">Monad Mainnet</option>
+              <option value="testnet">Monad Testnet</option>
+            </select>
+          </div>
+          <div>
+            <label>策略标的</label>
+            <select id="symbol">
+              <option value="BTC">BTC</option>
+              <option value="ETH">ETH</option>
+              <option value="SOL">SOL</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>主钱包地址</label>
+            <input id="traderAddress" placeholder="连接 MetaMask 后自动填充" />
+          </div>
+          <div>
+            <label>RPC URL</label>
+            <input id="rpcUrl" placeholder="默认自动填充" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>本地 Trader Agent</label>
+            <input id="sessionAddress" readonly class="mono" placeholder="首次连接后自动生成并保存在本地浏览器" />
+          </div>
+          <div>
+            <label>当前链上授权</label>
+            <input id="authorizedAgent" readonly class="mono" placeholder="点击连接/刷新后检查" />
+          </div>
+        </div>
+
+        <div class="btns">
+          <button id="connectBtn">连接 MetaMask</button>
+          <button id="regenerateAgentBtn" class="secondary">重置本地 Agent</button>
+          <button id="authorizeAgentBtn" class="secondary">授权 Agent</button>
+          <button id="revokeAgentBtn" class="secondary">撤销授权</button>
+          <button id="refreshAuthBtn" class="secondary">刷新授权状态</button>
+        </div>
+
+        <div class="note">
+          页面不会要求你输入任何私钥。首次连接后会在浏览器本地自动生成一个隐藏的 Trader Agent，并由 MetaMask 主钱包向 OneClickAgent 发送授权交易。
+          如果更换浏览器、清空本地存储或重置 Agent，需要重新授权后才能让 Bot 自动签名。
+        </div>
+
+        <div class="stat">
+          <div><div class="k">OneClickAgent</div><div id="oneclickAgent" class="v mono" style="font-size:13px"></div></div>
+          <div><div class="k">LeverUp Diamond</div><div id="diamond" class="v mono" style="font-size:13px"></div></div>
+          <div><div class="k">USDC</div><div id="usdc" class="v mono" style="font-size:13px"></div></div>
+          <div><div class="k">LVUSD</div><div id="lvusd" class="v mono" style="font-size:13px"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>本地状态</h2>
+        <div class="stat">
+          <div><div class="k">最后动作</div><div id="lastAction" class="v" style="font-size:14px">-</div></div>
+          <div><div class="k">冷却到</div><div id="cooldownUntil" class="v" style="font-size:14px">-</div></div>
+          <div><div class="k">今日估算已实现 PnL</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">当前持仓数</div><div id="openCount" class="v">0</div></div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <div>
+            <label>LeverUp Portfolio</label>
+            <input id="portfolioUrl" readonly class="mono" placeholder="连接 MetaMask 后生成当前 Bot 仓位查看链接" />
+          </div>
+        </div>
+        <div class="btns">
+          <button id="openPortfolioBtn" class="secondary" disabled>查看 LeverUp 仓位</button>
+        </div>
+        <div class="note">
+          这里查看的是当前主钱包地址在 LeverUp 的 Portfolio 页面。Bot 的仓位归属于主钱包地址，不是本地 Agent 地址。
+          <br />
+          这是单文件网页工具。建议通过本地静态服务器运行，而不是直接 file:// 打开，这样更稳定。
+        </div>
+      </div>
+
+    </div>
+
+    <div class="stack-section">
+      <div class="card">
+        <h2>策略与风控</h2>
+        <div class="row-3">
+          <div>
+            <label>最大保证金 LVUSD</label>
+            <input id="maxMargin" type="number" min="10" step="0.1" value="15" />
+          </div>
+          <div>
+            <label>默认杠杆</label>
+            <input id="leverage" type="number" min="1" max="100" step="0.1" value="20" />
+          </div>
+          <div>
+            <label>单笔风险 %</label>
+            <input id="riskPct" type="number" min="0.1" step="0.1" value="0.5" />
+          </div>
+          <div>
+            <label>可接受滑点 %</label>
+            <input id="slippagePct" type="number" min="0.5" max="2" step="0.1" value="1.0" />
+          </div>
+        </div>
+        <div class="row-3">
+          <div>
+            <label>止损 ATR 倍数</label>
+            <input id="slAtr" type="number" step="0.1" value="1.4" />
+          </div>
+          <div>
+            <label>止盈 RR 倍数</label>
+            <input id="tpRr" type="number" step="0.1" value="2.2" />
+          </div>
+          <div>
+            <label>最大持仓分钟</label>
+            <input id="maxHoldMins" type="number" step="1" value="240" />
+          </div>
+        </div>
+        <div class="row-3">
+          <div>
+            <label>亏损后冷却分钟</label>
+            <input id="lossCooldown" type="number" step="1" value="90" />
+          </div>
+          <div>
+            <label>赢利后冷却分钟</label>
+            <input id="winCooldown" type="number" step="1" value="20" />
+          </div>
+          <div>
+            <label>日亏损熔断 %</label>
+            <input id="dayStopPct" type="number" step="0.1" value="3" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>策略周期</label>
+            <select id="pollMs">
+              <option value="60000">60 秒</option>
+              <option value="120000">120 秒</option>
+              <option value="300000">300 秒</option>
+            </select>
+          </div>
+          <div>
+            <label>市场方向</label>
+            <select id="directionMode">
+              <option value="both">双向</option>
+              <option value="long">只做多</option>
+              <option value="short">只做空</option>
+            </select>
+          </div>
+          <div>
+            <label>入场风格</label>
+            <select id="entryMode">
+              <option value="aggressive">激进</option>
+              <option value="conservative">稳健</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="btns">
+          <button id="runOnceBtn" class="good">运行一次策略</button>
+          <button id="startBtn" class="warn">启动 Bot</button>
+          <button id="stopBtn" class="danger">停止 Bot</button>
+        </div>
+
+        <div class="note">
+          BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
+          平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
+          当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
+        </div>
+
+        <div class="stat">
+          <div><div class="k">15m 信号</div><div id="signal15" class="v">-</div></div>
+          <div><div class="k">4h 趋势</div><div id="signal4h" class="v">-</div></div>
+          <div><div class="k">参考价格</div><div id="lastPrice" class="v">-</div></div>
+          <div><div class="k">ATR(15m)</div><div id="lastAtr" class="v">-</div></div>
+        </div>
+
+        <div class="row" style="margin-top:14px;">
+          <div>
+            <label>信号诊断</label>
+            <textarea id="signalDiag" readonly placeholder="运行一次策略后显示本轮 LONG / SHORT 诊断"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-section">
+      <div class="card">
+        <h2>手动交易</h2>
+        <div class="row-3">
+          <div>
+            <label>方向</label>
+            <select id="manualSide">
+              <option value="long">Long</option>
+              <option value="short">Short</option>
+            </select>
+          </div>
+          <div>
+            <label>保证金 LVUSD</label>
+            <input id="manualMargin" type="number" min="10" step="0.1" value="10.5" />
+          </div>
+          <div>
+            <label>杠杆</label>
+            <input id="manualLeverage" type="number" min="1" max="100" step="0.1" value="20" />
+          </div>
+        </div>
+
+        <div class="btns">
+          <button id="manualOpenBtn">手动开仓</button>
+          <button id="refreshPosBtn" class="secondary">刷新持仓</button>
+        </div>
+
+        <div class="note">
+          页面默认使用 LVUSD 作为 collateral，并提交 LeverUp 1CT 的 send-open-position / send-close-position 请求。关闭仓位时会先链上读取 getPositionsV2 获得 positionHash。
+          你的钱包里需要先有 LVUSD，并完成对 LeverUp 合约的 LVUSD 授权。
+          本工具不保证盈利；自动仓位会按 `最大保证金 x 风险预算%` 反推仓位，避免继续错误复用手动面板参数。
+        </div>
+
+        <div class="wide" style="margin-top:14px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Hash</th>
+                <th>方向</th>
+                <th>保证金</th>
+                <th>数量</th>
+                <th>开仓价</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="positionsBody">
+              <tr><td colspan="6" style="color:var(--muted)">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script type="module">
+  import {
+    createPublicClient,
+    createWalletClient,
+    custom,
+    http,
+    encodeFunctionData,
+    formatUnits,
+    parseUnits,
+    keccak256,
+    stringToHex
+  } from 'https://esm.sh/viem@2.24.3';
+  import { privateKeyToAccount, generatePrivateKey } from 'https://esm.sh/viem@2.24.3/accounts';
+
+  const CONFIG = {
+    mainnet: {
+      label: 'Monad Mainnet',
+      chainId: 143,
+      rpcUrl: 'https://rpc.monad.xyz',
+      explorerUrl: 'https://monadscan.com',
+      keeperUrl: 'https://oneclick-01-keeper.leverup.xyz',
+      oneClickAgent: '0x1567FB09f13653f63A047B4F11Fb11fD1D7567d0',
+      diamond: '0xea1b8E4aB7f14F7dCA68c5B214303B13078FC5ec',
+      usdc: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
+      lvusd: '0xFD44B35139Ae53FFF7d8F2A9869c503D987f00d1',
+      symbols: {
+        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' },
+        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' },
+        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d' }
+      }
+    },
+    testnet: {
+      label: 'Monad Testnet',
+      chainId: 10143,
+      rpcUrl: 'https://testnet-rpc.monad.xyz',
+      explorerUrl: 'https://testnet.monadscan.com',
+      keeperUrl: 'https://oneclick-01-keeper.leverup.xyz',
+      oneClickAgent: '0xd9d2ccF34E80906c6e132B755b0Ed591dc4A9938',
+      diamond: '0x1bA73F7ab65D9712D45BE5A8961a4609874f6D13',
+      usdc: '0xA1E873dFc5B1b69e268ab88de42E6e2090bc545a',
+      lvusd: '0x76903262B1d4b70E3F2a5Af8Ed9F7E8Ace646Dcc',
+      symbols: {
+        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' },
+        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' },
+        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d' }
+      }
+    }
+  };
+
+  const LOCAL_AGENT_STORAGE_KEY = 'leverup_hidden_agent_pk_v2';
+  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+  const MIN_MARGIN_USDC = 10;
+  const MIN_NOTIONAL_USD = 200;
+  const MAX_SYMBOL_LEVERAGE = 100;
+  const EXECUTION_FEE_USD = 0;
+  const OPEN_FEE_RATE = 7 / 10000;
+  const MIN_NOTIONAL_CHECK_BUFFER = 0.005;
+  const COLLATERAL_SYMBOL = 'LVUSD';
+  const COLLATERAL_DECIMALS = 18;
+  const USDC_PYTH_ID = '0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a';
+  const ONE_CLICK_AGENT_ABI = [
+    {
+      type: 'event',
+      name: 'SetTraderAgent',
+      anonymous: false,
+      inputs: [
+        { indexed: true, name: 'trader', type: 'address' },
+        { indexed: true, name: 'agent', type: 'address' }
+      ]
+    },
+    {
+      type: 'function',
+      name: 'getTraderAgent',
+      stateMutability: 'view',
+      inputs: [{ name: '', type: 'address' }],
+      outputs: [{ name: '', type: 'address' }]
+    },
+    {
+      type: 'function',
+      name: 'setTraderAgent',
+      stateMutability: 'nonpayable',
+      inputs: [{ name: 'agent', type: 'address' }],
+      outputs: []
+    }
+  ];
+  const POSITIONS_ABI = [{
+    type: 'function', name: 'getPositionsV2', stateMutability: 'view',
+    inputs: [{ name: 'user', type: 'address' }, { name: 'pairBase', type: 'address' }],
+    outputs: [{
+      name: '', type: 'tuple[]', components: [
+        { name: 'positionHash', type: 'bytes32' },
+        { name: 'pair', type: 'string' },
+        { name: 'pairBase', type: 'address' },
+        { name: 'tokenIn', type: 'address' },
+        { name: 'marginToken', type: 'address' },
+        { name: 'isLong', type: 'bool' },
+        { name: 'margin', type: 'uint96' },
+        { name: 'qty', type: 'uint128' },
+        { name: 'entryPrice', type: 'uint128' },
+        { name: 'stopLoss', type: 'uint128' },
+        { name: 'takeProfit', type: 'uint128' },
+        { name: 'openFee', type: 'uint96' },
+        { name: 'executionFee', type: 'uint96' },
+        { name: 'fundingFee', type: 'int256' },
+        { name: 'timestamp', type: 'uint32' },
+        { name: 'holdingFee', type: 'uint96' }
+      ]
+    }]
+  }];
+
+  const OPEN_TYPES = {
+    OneClickOpenPosition: [
+      { name: 'pairBase', type: 'address' },
+      { name: 'isLong', type: 'bool' },
+      { name: 'tokenIn', type: 'address' },
+      { name: 'lvToken', type: 'address' },
+      { name: 'amountIn', type: 'uint96' },
+      { name: 'qty', type: 'uint128' },
+      { name: 'price', type: 'uint128' },
+      { name: 'stopLoss', type: 'uint128' },
+      { name: 'takeProfit', type: 'uint128' },
+      { name: 'broker', type: 'uint24' },
+      { name: 'trader', type: 'address' },
+      { name: 'salt', type: 'bytes32' },
+      { name: 'deadline', type: 'uint128' }
+    ]
+  };
+
+  const CLOSE_TYPES = {
+    OneClickClosePosition: [
+      { name: 'positionHash', type: 'bytes32' },
+      { name: 'deadline', type: 'uint128' }
+    ]
+  };
+
+  const els = Object.fromEntries([...document.querySelectorAll('[id]')].map(el => [el.id, el]));
+  const state = {
+    traderAddress: '',
+    sessionAccount: null,
+    currentAuthorizedAgent: ZERO_ADDRESS,
+    agentAuthorized: false,
+    authStatusNote: '',
+    publicClient: null,
+    timer: null,
+    running: false,
+    latest: null,
+    cooldownUntil: 0,
+    dayPnl: Number(localStorage.getItem('leverup_dayPnl') || '0'),
+    lastAction: localStorage.getItem('leverup_lastAction') || '-',
+    lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0')
+  };
+
+  function cfg() {
+    return CONFIG[els.network.value];
+  }
+
+  function shortAddress(address) {
+    return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  }
+
+  function getPortfolioUrl() {
+    if (!state.traderAddress) return '';
+    return `https://app.leverup.xyz/portfolio/${state.traderAddress}`;
+  }
+
+  function toChainHex(chainId) {
+    return `0x${chainId.toString(16)}`;
+  }
+
+  function getAuthorizationCacheKey() {
+    if (!state.traderAddress) return '';
+    return `leverup_authorized_agent_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
+  }
+
+  function persistKnownAuthorization(address) {
+    const key = getAuthorizationCacheKey();
+    if (!key) return;
+    if (!address || address === ZERO_ADDRESS) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, address);
+  }
+
+  function hydrateKnownAuthorizationFromCache() {
+    const key = getAuthorizationCacheKey();
+    if (!key || !state.sessionAccount) return false;
+    const cached = localStorage.getItem(key);
+    if (!cached) return false;
+    state.currentAuthorizedAgent = cached;
+    state.agentAuthorized = cached.toLowerCase() === state.sessionAccount.address.toLowerCase();
+    state.authStatusNote = state.agentAuthorized ? '已按本地缓存恢复' : '缓存为其它地址';
+    updateAuthorizationBadge();
+    return state.agentAuthorized;
+  }
+
+  function setBadge(dotEl, txtEl, ok, text) {
+    dotEl.className = 'dot ' + (ok ? 'ok' : 'bad');
+    txtEl.textContent = text;
+  }
+
+  function nowISO() {
+    return new Date().toLocaleString('zh-CN', { hour12: false });
+  }
+
+  function getErrorMessage(error) {
+    if (!error) return '未知错误';
+    if (typeof error === 'string') return error;
+    const parts = [];
+    const push = value => {
+      if (!value || parts.includes(value)) return;
+      parts.push(String(value));
+    };
+    push(error.shortMessage);
+    push(error.details);
+    push(error.message);
+    push(error?.cause?.shortMessage);
+    push(error?.cause?.details);
+    push(error?.cause?.message);
+    return parts.filter(Boolean).join(' | ') || String(error);
+  }
+
+  async function parseApiResponse(res, fallbackMessage) {
+    const raw = await res.text();
+    let json = null;
+    try {
+      json = raw ? JSON.parse(raw) : null;
+    } catch {
+      json = null;
+    }
+    if (!res.ok) {
+      const detail =
+        json?.message ||
+        json?.error ||
+        (json ? JSON.stringify(json) : '') ||
+        raw ||
+        fallbackMessage;
+      throw new Error(`HTTP ${res.status} ${res.statusText}: ${detail}`);
+    }
+    return json || {};
+  }
+
+  function log(...args) {
+    const msg = `[${nowISO()}] ${args.join(' ')}`;
+    els.log.textContent = msg + '\n' + els.log.textContent;
+  }
+
+  function persistState() {
+    localStorage.setItem('leverup_dayPnl', String(state.dayPnl));
+    localStorage.setItem('leverup_lastAction', state.lastAction);
+    localStorage.setItem('leverup_lastTradeTs', String(state.lastTradeTs));
+  }
+
+  function updateStaticNetworkFields() {
+    const c = cfg();
+    els.rpcUrl.value = c.rpcUrl;
+    els.oneclickAgent.textContent = c.oneClickAgent;
+    els.diamond.textContent = c.diamond;
+    els.usdc.textContent = c.usdc;
+    els.lvusd.textContent = c.lvusd;
+    state.publicClient = createPublicClient({
+      transport: window.ethereum ? custom(window.ethereum) : http(els.rpcUrl.value)
+    });
+    if (state.traderAddress) {
+      refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e)));
+    }
+  }
+
+  async function switchToConfiguredNetwork() {
+    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    const chainId = toChainHex(cfg().chainId);
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId }]
+      });
+    } catch (err) {
+      if (err?.code !== 4902) throw err;
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId,
+          chainName: cfg().label,
+          rpcUrls: [cfg().rpcUrl],
+          blockExplorerUrls: [cfg().explorerUrl],
+          nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 }
+        }]
+      });
+    }
+  }
+
+  function updateLocalAgentBadge() {
+    if (!state.sessionAccount) {
+      els.sessionAddress.value = '';
+      setBadge(els.sessDot, els.sessStatus, false, '未就绪');
+      return;
+    }
+    els.sessionAddress.value = state.sessionAccount.address;
+    setBadge(els.sessDot, els.sessStatus, true, shortAddress(state.sessionAccount.address));
+  }
+
+  function updatePortfolioEntry() {
+    const url = getPortfolioUrl();
+    els.portfolioUrl.value = url;
+    els.openPortfolioBtn.disabled = !url;
+  }
+
+  function updateAuthorizationBadge() {
+    els.authorizedAgent.value = state.currentAuthorizedAgent === ZERO_ADDRESS ? '' : state.currentAuthorizedAgent;
+    if (!state.traderAddress) {
+      setBadge(els.authDot, els.authStatus, false, '未检查');
+      return;
+    }
+    if (state.authStatusNote) {
+      setBadge(els.authDot, els.authStatus, false, state.authStatusNote);
+      return;
+    }
+    if (state.agentAuthorized) {
+      setBadge(els.authDot, els.authStatus, true, '已授权当前 Agent');
+      return;
+    }
+    if (state.currentAuthorizedAgent !== ZERO_ADDRESS) {
+      setBadge(els.authDot, els.authStatus, false, '已授权其它地址');
+      return;
+    }
+    setBadge(els.authDot, els.authStatus, false, '未授权');
+  }
+
+  function hydrateLocalAgent(pk) {
+    if (!pk) {
+      state.sessionAccount = null;
+      updateLocalAgentBadge();
+      return;
+    }
+    const normalizedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+    state.sessionAccount = privateKeyToAccount(normalizedPk);
+    updateLocalAgentBadge();
+  }
+
+  function ensureLocalAgent() {
+    const existingPk = localStorage.getItem(LOCAL_AGENT_STORAGE_KEY);
+    if (existingPk) {
+      hydrateLocalAgent(existingPk);
+      return false;
+    }
+    const pk = generatePrivateKey();
+    localStorage.setItem(LOCAL_AGENT_STORAGE_KEY, pk);
+    hydrateLocalAgent(pk);
+    log('已初始化本地 Trader Agent:', state.sessionAccount.address);
+    return true;
+  }
+
+  function regenerateLocalAgent() {
+    if (state.running) stopBot();
+    const confirmed = window.confirm('重置后需要重新授权新的本地 Agent，是否继续？');
+    if (!confirmed) return;
+    const pk = generatePrivateKey();
+    localStorage.setItem(LOCAL_AGENT_STORAGE_KEY, pk);
+    hydrateLocalAgent(pk);
+    state.agentAuthorized = false;
+    state.currentAuthorizedAgent = ZERO_ADDRESS;
+    state.authStatusNote = '待重新授权';
+    updateAuthorizationBadge();
+    log('已重置本地 Trader Agent:', state.sessionAccount.address);
+  }
+
+  async function providerRequest(method, params = []) {
+    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    return window.ethereum.request({ method, params });
+  }
+
+  async function waitForTransactionByProvider(txHash, timeoutMs = 30000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const tx = await providerRequest('eth_getTransactionByHash', [txHash]);
+      if (tx) return tx;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    return null;
+  }
+
+  async function waitForTransactionReceiptByProvider(txHash, timeoutMs = 120000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const receipt = await providerRequest('eth_getTransactionReceipt', [txHash]);
+      if (receipt) return receipt;
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    return null;
+  }
+
+  function updateAuthorizationState(address, note = '') {
+    state.currentAuthorizedAgent = address || ZERO_ADDRESS;
+    state.agentAuthorized = !!state.sessionAccount && state.currentAuthorizedAgent.toLowerCase() === state.sessionAccount.address.toLowerCase();
+    state.authStatusNote = note;
+    persistKnownAuthorization(state.currentAuthorizedAgent);
+    updateAuthorizationBadge();
+    return true;
+  }
+
+  async function refreshAgentAuthorizationStatus() {
+    if (!state.traderAddress || !state.publicClient) {
+      state.agentAuthorized = false;
+      state.currentAuthorizedAgent = ZERO_ADDRESS;
+      state.authStatusNote = '';
+      updateAuthorizationBadge();
+      return false;
+    }
+    try {
+      const traderAgent = await state.publicClient.readContract({
+        address: cfg().oneClickAgent,
+        abi: ONE_CLICK_AGENT_ABI,
+        functionName: 'getTraderAgent',
+        args: [state.traderAddress]
+      });
+      updateAuthorizationState(traderAgent);
+      return state.agentAuthorized;
+    } catch (e) {
+      if (hydrateKnownAuthorizationFromCache()) {
+        return state.agentAuthorized;
+      }
+      state.authStatusNote = '授权状态待确认';
+      updateAuthorizationBadge();
+      throw e;
+    }
+  }
+
+  async function writeAgentAuthorization(address) {
+    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    if (!state.traderAddress) throw new Error('请先连接 MetaMask');
+    await switchToConfiguredNetwork();
+    if (!state.publicClient) {
+      state.publicClient = createPublicClient({ transport: custom(window.ethereum) });
+    }
+    const data = encodeFunctionData({
+      abi: ONE_CLICK_AGENT_ABI,
+      functionName: 'setTraderAgent',
+      args: [address]
+    });
+    let gas;
+    try {
+      gas = await state.publicClient.estimateContractGas({
+        address: cfg().oneClickAgent,
+        abi: ONE_CLICK_AGENT_ABI,
+        functionName: 'setTraderAgent',
+        account: state.traderAddress,
+        args: [address]
+      });
+    } catch (e) {
+      throw new Error(`授权交易预估失败: ${getErrorMessage(e)}`);
+    }
+    const txHash = await providerRequest('eth_sendTransaction', [{
+      from: state.traderAddress,
+      to: cfg().oneClickAgent,
+      data,
+      gas: `0x${gas.toString(16)}`
+    }]);
+    state.authStatusNote = '等待链上确认';
+    updateAuthorizationBadge();
+    log('已发送授权交易:', txHash);
+    const visibleTx = await waitForTransactionByProvider(txHash, 30000);
+    if (!visibleTx) {
+      state.authStatusNote = '交易未广播';
+      updateAuthorizationBadge();
+      throw new Error('钱包返回了交易哈希，但 RPC 未看到该交易。请检查 MetaMask 活动页，确认这笔授权是否真的已广播。');
+    }
+    const receipt = await waitForTransactionReceiptByProvider(txHash);
+    if (!receipt) {
+      log('授权交易已发出，但暂时未拿到回执，可稍后点“刷新授权状态”确认');
+      return txHash;
+    }
+    if (receipt.status !== '0x1') {
+      state.authStatusNote = '授权交易失败';
+      updateAuthorizationBadge();
+      throw new Error('授权交易链上执行失败');
+    }
+    updateAuthorizationState(address, '已确认，校验中');
+    await refreshAgentAuthorizationStatus().catch(e => {
+      log('授权已确认，但回读状态失败:', getErrorMessage(e));
+    });
+    return txHash;
+  }
+
+  async function authorizeLocalAgent() {
+    ensureLocalAgent();
+    const txHash = await writeAgentAuthorization(state.sessionAccount.address);
+    log('本地 Agent 已授权:', state.sessionAccount.address, txHash);
+  }
+
+  async function revokeLocalAgent() {
+    if (state.running) stopBot();
+    const txHash = await writeAgentAuthorization(ZERO_ADDRESS);
+    log('已撤销当前 Trader Agent 授权:', txHash);
+  }
+
+  function assertTradingReady() {
+    if (!state.traderAddress) throw new Error('请先连接 MetaMask');
+    if (!state.sessionAccount) throw new Error('本地 Trader Agent 未初始化');
+    if (!state.agentAuthorized) throw new Error('请先用 MetaMask 授权当前本地 Agent');
+  }
+
+  async function connectMetaMask() {
+    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    await switchToConfiguredNetwork();
+    state.publicClient = createPublicClient({ transport: custom(window.ethereum) });
+    const accounts = await providerRequest('eth_requestAccounts');
+    const [address] = accounts || [];
+    if (!address) throw new Error('MetaMask 未返回可用账户');
+    state.traderAddress = address;
+    els.traderAddress.value = address;
+    updatePortfolioEntry();
+    ensureLocalAgent();
+    hydrateKnownAuthorizationFromCache();
+    setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
+    log('已连接 MetaMask:', address);
+    refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
+  }
+
+  function getDirectionFilter(signal) {
+    const mode = els.directionMode.value;
+    if (mode === 'both') return signal;
+    if (mode === 'long') return signal === 'LONG' ? signal : 'FLAT';
+    if (mode === 'short') return signal === 'SHORT' ? signal : 'FLAT';
+    return signal;
+  }
+
+  async function fetchKlines(symbol, interval, limit = 250) {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`);
+    if (!res.ok) throw new Error(`获取 ${symbol} ${interval} K线失败`);
+    return (await res.json()).map(k => ({
+      openTime: Number(k[0]),
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5]),
+      closeTime: Number(k[6])
+    }));
+  }
+
+  function ema(values, period) {
+    const k = 2 / (period + 1);
+    let out = [];
+    let prev = values[0];
+    for (const v of values) {
+      prev = v * k + prev * (1 - k);
+      out.push(prev);
+    }
+    return out;
+  }
+
+  function atr(klines, period = 14) {
+    const tr = [];
+    for (let i = 0; i < klines.length; i++) {
+      if (i === 0) {
+        tr.push(klines[i].high - klines[i].low);
+      } else {
+        const c = klines[i - 1].close;
+        tr.push(Math.max(
+          klines[i].high - klines[i].low,
+          Math.abs(klines[i].high - c),
+          Math.abs(klines[i].low - c)
+        ));
+      }
+    }
+    return ema(tr, period);
+  }
+
+  function analyzeSignal(k15, k4h) {
+    const closes15 = k15.map(k => k.close);
+    const closes4h = k4h.map(k => k.close);
+    const ema20 = ema(closes15, 20);
+    const ema50_4h = ema(closes4h, 50);
+    const ema200_4h = ema(closes4h, 200);
+    const atr15 = atr(k15, 14);
+
+    const last15 = k15[k15.length - 1];
+    const prev15 = k15[k15.length - 2];
+    const lastPrice = last15.close;
+    const prevEma20 = ema20[ema20.length - 2];
+    const lastEma20 = ema20[ema20.length - 1];
+    const lastEma50_4h = ema50_4h[ema50_4h.length - 1];
+    const lastEma200_4h = ema200_4h[ema200_4h.length - 1];
+    const trendUp = lastEma50_4h > lastEma200_4h;
+    const trendDown = lastEma50_4h < lastEma200_4h;
+    const ema20Rising = lastEma20 > prevEma20;
+    const ema20Falling = lastEma20 < prevEma20;
+    const longTouchThreshold = lastEma20 * 1.002;
+    const shortTouchThreshold = lastEma20 * 0.998;
+    const longTouchEma = last15.low <= longTouchThreshold;
+    const shortTouchEma = last15.high >= shortTouchThreshold;
+    const longBreakout = last15.close > prev15.high;
+    const shortBreakdown = last15.close < prev15.low;
+    const closeAboveEma = last15.close > lastEma20;
+    const closeBelowEma = last15.close < lastEma20;
+    const longReclaim = prev15.close <= prevEma20 && closeAboveEma;
+    const shortReclaim = prev15.close >= prevEma20 && closeBelowEma;
+    const aggressiveLongTrigger = longTouchEma || longBreakout || longReclaim;
+    const aggressiveShortTrigger = shortTouchEma || shortBreakdown || shortReclaim;
+    const pullbackLong = longTouchEma && longBreakout;
+    const pullbackShort = shortTouchEma && shortBreakdown;
+    const entryMode = els.entryMode?.value || 'aggressive';
+    const aggressiveLong = trendUp && closeAboveEma && ema20Rising && aggressiveLongTrigger;
+    const aggressiveShort = trendDown && closeBelowEma && ema20Falling && aggressiveShortTrigger;
+
+    let signal = 'FLAT';
+    if (entryMode === 'aggressive') {
+      if (aggressiveLong) signal = 'LONG';
+      else if (aggressiveShort) signal = 'SHORT';
+    } else {
+      if (trendUp && pullbackLong) signal = 'LONG';
+      else if (trendDown && pullbackShort) signal = 'SHORT';
+    }
+
+    return {
+      signal,
+      trend: trendUp ? 'UP' : trendDown ? 'DOWN' : 'SIDEWAYS',
+      price: lastPrice,
+      atr: atr15[atr15.length - 1],
+      ema20: lastEma20,
+      diag: {
+        entryMode,
+        prevEma20,
+        lastEma20,
+        lastEma50_4h,
+        lastEma200_4h,
+        trendUp,
+        trendDown,
+        ema20Rising,
+        ema20Falling,
+        longTouchEma,
+        shortTouchEma,
+        longBreakout,
+        shortBreakdown,
+        closeAboveEma,
+        closeBelowEma,
+        longReclaim,
+        shortReclaim,
+        aggressiveLongTrigger,
+        aggressiveShortTrigger,
+        aggressiveLong,
+        aggressiveShort,
+        longTouchThreshold,
+        shortTouchThreshold,
+        last15Low: last15.low,
+        last15High: last15.high,
+        last15Close: last15.close,
+        prev15High: prev15.high,
+        prev15Low: prev15.low
+      }
+    };
+  }
+
+  function formatPrice(v) {
+    if (!Number.isFinite(v)) return '-';
+    return v >= 1000 ? v.toFixed(2) : v.toFixed(4);
+  }
+
+  function buildDirectionalFailureReasons(sig, side) {
+    const d = sig.diag;
+    if (!d) return [];
+    const aggressive = d.entryMode === 'aggressive';
+    if (side === 'LONG') {
+      const reasons = [];
+      if (!d.trendUp) reasons.push(`4h 非多头: EMA50 ${formatPrice(d.lastEma50_4h)} <= EMA200 ${formatPrice(d.lastEma200_4h)}`);
+      if (aggressive) {
+        if (!d.closeAboveEma) reasons.push(`15m 收盘未站上 EMA20: close ${formatPrice(d.last15Close)} <= EMA20 ${formatPrice(d.lastEma20)}`);
+        if (!d.ema20Rising) reasons.push(`15m EMA20 未上拐: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
+        if (!d.aggressiveLongTrigger) reasons.push(`15m 未触发任一入场项: 回踩=${d.longTouchEma ? '是' : '否'} 突破=${d.longBreakout ? '是' : '否'} 站回=${d.longReclaim ? '是' : '否'}`);
+      } else {
+        if (!d.longTouchEma) reasons.push(`15m 未回踩 EMA20: low ${formatPrice(d.last15Low)} > 阈值 ${formatPrice(d.longTouchThreshold)}`);
+        if (!d.longBreakout) reasons.push(`15m 未突破前高: close ${formatPrice(d.last15Close)} <= prevHigh ${formatPrice(d.prev15High)}`);
+      }
+      return reasons;
+    }
+    const reasons = [];
+    if (!d.trendDown) reasons.push(`4h 非空头: EMA50 ${formatPrice(d.lastEma50_4h)} >= EMA200 ${formatPrice(d.lastEma200_4h)}`);
+    if (aggressive) {
+      if (!d.closeBelowEma) reasons.push(`15m 收盘未跌破 EMA20: close ${formatPrice(d.last15Close)} >= EMA20 ${formatPrice(d.lastEma20)}`);
+      if (!d.ema20Falling) reasons.push(`15m EMA20 未下拐: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
+      if (!d.aggressiveShortTrigger) reasons.push(`15m 未触发任一入场项: 回抽=${d.shortTouchEma ? '是' : '否'} 跌破=${d.shortBreakdown ? '是' : '否'} 失守=${d.shortReclaim ? '是' : '否'}`);
+    } else {
+      if (!d.shortTouchEma) reasons.push(`15m 未回抽 EMA20: high ${formatPrice(d.last15High)} < 阈值 ${formatPrice(d.shortTouchThreshold)}`);
+      if (!d.shortBreakdown) reasons.push(`15m 未跌破前低: close ${formatPrice(d.last15Close)} >= prevLow ${formatPrice(d.prev15Low)}`);
+    }
+    return reasons;
+  }
+
+  function summarizeSignalDecision(sig, filteredSignal) {
+    if (!sig?.diag) return '诊断数据未就绪';
+    if (sig.signal !== 'FLAT' && filteredSignal === 'FLAT') {
+      const modeLabel = els.directionMode.value === 'long' ? '只做多' : '只做空';
+      return `原始信号 ${sig.signal}，但已被方向过滤（当前设置：${modeLabel}）`;
+    }
+    if (filteredSignal === 'LONG' || filteredSignal === 'SHORT') {
+      return `原始信号 ${sig.signal}，满足 ${filteredSignal} 条件`;
+    }
+    const longReasons = buildDirectionalFailureReasons(sig, 'LONG');
+    const shortReasons = buildDirectionalFailureReasons(sig, 'SHORT');
+    return `LONG 缺失: ${longReasons.join('；')} | SHORT 缺失: ${shortReasons.join('；')}`;
+  }
+
+  function renderSignalDiagnostics(sig, filteredSignal) {
+    if (!els.signalDiag) return;
+    if (!sig?.diag) {
+      els.signalDiag.value = '运行一次策略后显示诊断';
+      return;
+    }
+    const d = sig.diag;
+    const modeMap = { both: '双向', long: '只做多', short: '只做空' };
+    const entryModeMap = { aggressive: '激进', conservative: '稳健' };
+    const lines = [
+      `原始信号: ${sig.signal}`,
+      `过滤后信号: ${filteredSignal}`,
+      `方向设置: ${modeMap[els.directionMode.value] || '双向'}`,
+      `入场风格: ${entryModeMap[d.entryMode] || d.entryMode}`,
+      `4h 趋势: EMA50=${formatPrice(d.lastEma50_4h)} / EMA200=${formatPrice(d.lastEma200_4h)} -> ${sig.trend}`,
+      `15m 参考: close=${formatPrice(d.last15Close)} low=${formatPrice(d.last15Low)} high=${formatPrice(d.last15High)} EMA20=${formatPrice(d.lastEma20)}`,
+      '',
+      `LONG 条件`,
+      `- 4h 多头趋势: ${d.trendUp ? '通过' : '未通过'}`,
+      `- 15m 收盘站上 EMA20: ${d.closeAboveEma ? '通过' : '未通过'}`,
+      `- 15m EMA20 斜率向上: ${d.ema20Rising ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
+      `- 15m 回踩 EMA20: ${d.longTouchEma ? '通过' : '未通过'} (low ${formatPrice(d.last15Low)} / 阈值 ${formatPrice(d.longTouchThreshold)})`,
+      `- 15m 突破前高: ${d.longBreakout ? '通过' : '未通过'} (close ${formatPrice(d.last15Close)} / prevHigh ${formatPrice(d.prev15High)})`,
+      `- 15m 站回 EMA20: ${d.longReclaim ? '通过' : '未通过'}`,
+      '',
+      `SHORT 条件`,
+      `- 4h 空头趋势: ${d.trendDown ? '通过' : '未通过'}`,
+      `- 15m 收盘跌破 EMA20: ${d.closeBelowEma ? '通过' : '未通过'}`,
+      `- 15m EMA20 斜率向下: ${d.ema20Falling ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
+      `- 15m 回抽 EMA20: ${d.shortTouchEma ? '通过' : '未通过'} (high ${formatPrice(d.last15High)} / 阈值 ${formatPrice(d.shortTouchThreshold)})`,
+      `- 15m 跌破前低: ${d.shortBreakdown ? '通过' : '未通过'} (close ${formatPrice(d.last15Close)} / prevLow ${formatPrice(d.prev15Low)})`,
+      `- 15m 失守 EMA20: ${d.shortReclaim ? '通过' : '未通过'}`,
+      '',
+      `结论: ${summarizeSignalDecision(sig, filteredSignal)}`
+    ];
+    els.signalDiag.value = lines.join('\n');
+  }
+
+  function clampLeverage(v) {
+    if (!Number.isFinite(v)) return 1;
+    return Math.min(MAX_SYMBOL_LEVERAGE, Math.max(1, v));
+  }
+
+  function getBufferedMinNotionalUsd() {
+    return MIN_NOTIONAL_USD * (1 + MIN_NOTIONAL_CHECK_BUFFER);
+  }
+
+  function getPositionSizeUsd(inputMarginUsd, leverage) {
+    const marginAfterExecutionFee = Math.max(0, inputMarginUsd - EXECUTION_FEE_USD);
+    return (marginAfterExecutionFee * leverage) / (1 + leverage * OPEN_FEE_RATE);
+  }
+
+  function getRequiredMarginForPositionSize(positionSizeUsd, leverage) {
+    return EXECUTION_FEE_USD + (positionSizeUsd * (1 + leverage * OPEN_FEE_RATE)) / leverage;
+  }
+
+  function getMinRequiredMarginUsd(leverage) {
+    return Math.max(MIN_MARGIN_USDC, getRequiredMarginForPositionSize(getBufferedMinNotionalUsd(), leverage));
+  }
+
+  function getMinRequiredNotionalUsd(leverage) {
+    return getPositionSizeUsd(getMinRequiredMarginUsd(leverage), leverage);
+  }
+
+  function getRiskInputs() {
+    return {
+      maxMargin: Number(els.maxMargin.value),
+      leverage: clampLeverage(Number(els.leverage.value)),
+      riskPct: Number(els.riskPct.value),
+      slippagePct: Number(els.slippagePct.value),
+      slAtr: Number(els.slAtr.value),
+      tpRr: Number(els.tpRr.value),
+      maxHoldMins: Number(els.maxHoldMins.value),
+      lossCooldown: Number(els.lossCooldown.value),
+      winCooldown: Number(els.winCooldown.value),
+      dayStopPct: Number(els.dayStopPct.value)
+    };
+  }
+
+  function buildStops(side, price, atrValue) {
+    const r = getRiskInputs();
+    const stopDistance = atrValue * r.slAtr;
+    const stopLoss = side === 'LONG' ? price - stopDistance : price + stopDistance;
+    const takeProfit = side === 'LONG' ? price + stopDistance * r.tpRr : price - stopDistance * r.tpRr;
+    return { stopDistance, stopLoss, takeProfit };
+  }
+
+  function getAcceptablePrice(side, price) {
+    const slippagePct = Math.max(0, Number(els.slippagePct.value) || 0);
+    const factor = side === 'LONG'
+      ? 1 + slippagePct / 100
+      : 1 - slippagePct / 100;
+    return Math.max(0.00000001, price * factor);
+  }
+
+  function buildManualTradePlan(side, price, atrValue) {
+    const leverage = clampLeverage(Number(els.manualLeverage.value));
+    const requestedMargin = Number(els.manualMargin.value);
+    const minRequiredMargin = getMinRequiredMarginUsd(leverage);
+    const margin = Math.max(minRequiredMargin, requestedMargin);
+    const notional = getPositionSizeUsd(margin, leverage);
+    const minRequiredNotionalUsd = getMinRequiredNotionalUsd(leverage);
+    const qtyBase = notional / price;
+    return {
+      margin,
+      leverage,
+      notional,
+      qtyBase,
+      requestedMargin,
+      minRequiredMargin,
+      minRequiredNotionalUsd,
+      floorAdjusted: margin > requestedMargin + 1e-9,
+      ...buildStops(side, price, atrValue)
+    };
+  }
+
+  function buildAutoTradePlan(side, price, atrValue) {
+    const r = getRiskInputs();
+    const leverage = clampLeverage(r.leverage);
+    const riskBudgetUsd = Math.max(0, r.maxMargin * (r.riskPct / 100));
+    const { stopDistance, stopLoss, takeProfit } = buildStops(side, price, atrValue);
+    if (!Number.isFinite(stopDistance) || stopDistance <= 0) {
+      throw new Error('ATR 无效，无法计算止损距离');
+    }
+
+    const minRequiredNotionalUsd = getMinRequiredNotionalUsd(leverage);
+    const minQtyByNotional = minRequiredNotionalUsd / price;
+    const maxPositionSizeUsd = getPositionSizeUsd(r.maxMargin, leverage);
+    const maxQtyByMargin = maxPositionSizeUsd / price;
+    if (!Number.isFinite(maxQtyByMargin) || maxQtyByMargin < minQtyByNotional) {
+      return null;
+    }
+
+    const qtyByRisk = riskBudgetUsd / stopDistance;
+    const requestedQty = Math.max(qtyByRisk, minQtyByNotional);
+    const qtyBase = Math.min(requestedQty, maxQtyByMargin);
+    const positionSizeUsd = qtyBase * price;
+    const margin = getRequiredMarginForPositionSize(positionSizeUsd, leverage);
+    const effectiveRiskUsd = qtyBase * stopDistance;
+
+    if (!Number.isFinite(qtyBase) || qtyBase <= 0) {
+      return null;
+    }
+    if (margin < MIN_MARGIN_USDC || margin > r.maxMargin + 1e-9) {
+      return null;
+    }
+
+    return {
+      margin,
+      leverage,
+      notional: positionSizeUsd,
+      qtyBase,
+      stopDistance,
+      stopLoss,
+      takeProfit,
+      riskBudgetUsd,
+      effectiveRiskUsd,
+      minRequiredNotionalUsd,
+      floorApplied: qtyByRisk < minQtyByNotional
+    };
+  }
+
+  async function fetchPythUpdateData(symbol) {
+    const pythId = cfg().symbols[symbol].pythId;
+    const url = `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${pythId}&ids[]=${USDC_PYTH_ID}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('获取 Pyth Update Data 失败');
+    const data = await res.json();
+    const out = data?.binary?.data || [];
+    if (!out.length) throw new Error('Pyth Update Data 为空');
+    return out;
+  }
+
+  function getSessionWalletClient() {
+    if (!state.sessionAccount) throw new Error('本地 Trader Agent 未就绪');
+    return createWalletClient({ account: state.sessionAccount, transport: http(els.rpcUrl.value) });
+  }
+
+  async function signOpenPosition(message) {
+    const client = getSessionWalletClient();
+    return client.signTypedData({
+      domain: { chainId: cfg().chainId, verifyingContract: cfg().oneClickAgent },
+      primaryType: 'OneClickOpenPosition',
+      types: OPEN_TYPES,
+      message
+    });
+  }
+
+  async function signClosePosition(message) {
+    const client = getSessionWalletClient();
+    return client.signTypedData({
+      domain: { chainId: cfg().chainId, verifyingContract: cfg().oneClickAgent },
+      primaryType: 'OneClickClosePosition',
+      types: CLOSE_TYPES,
+      message
+    });
+  }
+
+  async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit }) {
+    assertTradingReady();
+    const pairBase = cfg().symbols[symbol].pairBase;
+    const amountIn = parseUnits(String(margin.toFixed(COLLATERAL_DECIMALS)), COLLATERAL_DECIMALS);
+    const qty = BigInt(Math.floor(qtyBase * 1e10));
+    const side = isLong ? 'LONG' : 'SHORT';
+    const acceptablePrice = getAcceptablePrice(side, price);
+    const px = parseUnits(String(acceptablePrice.toFixed(8)), 18);
+    const sl = stopLoss > 0 ? parseUnits(String(stopLoss.toFixed(8)), 18) : 0n;
+    const tp = takeProfit > 0 ? parseUnits(String(takeProfit.toFixed(8)), 18) : 0n;
+    const salt = keccak256(stringToHex(`leverup-web:${Date.now()}:${Math.random()}`));
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+    const openData = {
+      pairBase,
+      isLong,
+      tokenIn: cfg().lvusd,
+      lvToken: cfg().lvusd,
+      amountIn,
+      qty,
+      price: px,
+      stopLoss: sl,
+      takeProfit: tp,
+      broker: 1
+    };
+    const message = { ...openData, trader: state.traderAddress, salt, deadline };
+    const signature = await signOpenPosition(message);
+    const pythUpdateData = await fetchPythUpdateData(symbol);
+
+    const body = {
+      openData: {
+        ...openData,
+        amountIn: amountIn.toString(),
+        qty: qty.toString(),
+        price: px.toString(),
+        stopLoss: sl.toString(),
+        takeProfit: tp.toString(),
+        broker: '1'
+      },
+      trader: state.traderAddress,
+      salt,
+      deadline: Number(deadline),
+      signature,
+      pythUpdateData
+    };
+
+    log(`准备发送开仓: side=${side} ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${(Number(els.slippagePct.value) || 0).toFixed(1)}%`);
+    const url = `${cfg().keeperUrl}/v1/trading/send-open-position?blockchain=MONAD`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return parseApiResponse(res, '开仓请求失败');
+  }
+
+  async function sendClosePosition(positionHash) {
+    assertTradingReady();
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+    const signature = await signClosePosition({ positionHash, deadline });
+    const url = `${cfg().keeperUrl}/v1/trading/send-close-position?blockchain=MONAD`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positionHash, deadline: Number(deadline), signature })
+    });
+    return parseApiResponse(res, '平仓请求失败');
+  }
+
+  async function waitExecution(inputHash, timeoutMs = 90000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const res = await fetch(`${cfg().keeperUrl}/v1/trading/${inputHash}/status`);
+      const json = await res.json();
+      if (json.executed) return json;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    throw new Error('等待执行超时');
+  }
+
+  async function fetchPositions() {
+    if (!state.traderAddress) return [];
+    const pairBase = cfg().symbols[els.symbol.value].pairBase;
+    const positions = await state.publicClient.readContract({
+      address: cfg().diamond,
+      abi: POSITIONS_ABI,
+      functionName: 'getPositionsV2',
+      args: [state.traderAddress, pairBase]
+    });
+    renderPositions(positions);
+    els.openCount.textContent = String(positions.length);
+    return positions;
+  }
+
+  function renderPositions(positions) {
+    if (!positions.length) {
+      els.positionsBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">暂无持仓</td></tr>';
+      return;
+    }
+    els.positionsBody.innerHTML = positions.map((p, idx) => `
+      <tr>
+        <td class="mono">${p.positionHash.slice(0, 10)}...</td>
+        <td>${p.isLong ? 'LONG' : 'SHORT'}</td>
+        <td>${Number(formatUnits(p.margin, 6)).toFixed(2)}</td>
+        <td>${Number(formatUnits(p.qty, 10)).toFixed(5)}</td>
+        <td>${formatPrice(Number(formatUnits(p.entryPrice, 18)))}</td>
+        <td><button class="danger" data-close="${p.positionHash}">平仓</button></td>
+      </tr>`).join('');
+  }
+
+  async function runStrategyCycle(trigger = 'bot') {
+    try {
+      assertTradingReady();
+      if (Date.now() < state.cooldownUntil) {
+        log('仍在冷却期，跳过本次策略执行');
+        return;
+      }
+
+      const symbol = els.symbol.value;
+      const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
+      const sig = analyzeSignal(k15, k4h);
+      state.latest = sig;
+      els.signal15.textContent = sig.signal;
+      els.signal4h.textContent = sig.trend;
+      els.lastPrice.textContent = formatPrice(sig.price);
+      els.lastAtr.textContent = formatPrice(sig.atr);
+
+      const positions = await fetchPositions();
+      const filteredSignal = getDirectionFilter(sig.signal);
+      renderSignalDiagnostics(sig, filteredSignal);
+      const r = getRiskInputs();
+
+      if (Math.abs(state.dayPnl) >= r.dayStopPct) {
+        log('已触发日亏损熔断，停止新开仓');
+        return;
+      }
+
+      if (positions.length > 0) {
+        const p = positions[0];
+        const entry = Number(formatUnits(p.entryPrice, 18));
+        const isLong = !!p.isLong;
+        const heldMins = (Date.now() / 1000 - Number(p.timestamp)) / 60;
+        const shouldClose =
+          heldMins >= r.maxHoldMins ||
+          (isLong && (sig.price <= entry - sig.atr * r.slAtr || sig.price >= entry + sig.atr * r.slAtr * r.tpRr || filteredSignal === 'SHORT')) ||
+          (!isLong && (sig.price >= entry + sig.atr * r.slAtr || sig.price <= entry - sig.atr * r.slAtr * r.tpRr || filteredSignal === 'LONG'));
+        if (shouldClose) {
+          log(`触发平仓条件，position=${p.positionHash}`);
+          const closeRes = await sendClosePosition(p.positionHash);
+          log('已发送平仓请求:', JSON.stringify(closeRes));
+          if (closeRes.input_hash) {
+            const status = await waitExecution(closeRes.input_hash).catch(e => ({ success: false, reason: e.message }));
+            log('平仓状态:', JSON.stringify(status));
+          }
+          state.lastAction = '平仓';
+          state.lastTradeTs = Date.now();
+          state.cooldownUntil = Date.now() + 1000 * 60 * r.lossCooldown;
+          persistState();
+          updateStatusPanel();
+          await fetchPositions();
+        } else {
+          log('已有持仓，当前未触发平仓条件');
+        }
+        return;
+      }
+
+      if (filteredSignal === 'FLAT') {
+        log(`${trigger} 无新信号: ${summarizeSignalDecision(sig, filteredSignal)}`);
+        return;
+      }
+
+      const plan = buildAutoTradePlan(filteredSignal, sig.price, sig.atr);
+      if (!plan) {
+        log(`当前最大保证金与杠杆不足以满足 LeverUp 最低开仓要求（至少 ${MIN_NOTIONAL_USD}U notional / ${MIN_MARGIN_USDC} ${COLLATERAL_SYMBOL} collateral），本次 ${filteredSignal} 信号跳过`);
+        return;
+      }
+      if (plan.floorApplied) {
+        log(`为满足 LeverUp 最低开仓要求，本次 ${filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，高于目标风险预算 ${plan.riskBudgetUsd.toFixed(2)}U`);
+      }
+      const openRes = await sendOpenPosition({
+        symbol,
+        isLong: filteredSignal === 'LONG',
+        margin: Math.min(plan.margin, r.maxMargin),
+        qtyBase: plan.qtyBase,
+        price: sig.price,
+        stopLoss: plan.stopLoss,
+        takeProfit: plan.takeProfit
+      });
+      log('已发送开仓请求:', JSON.stringify(openRes));
+      if (openRes.input_hash) {
+        const status = await waitExecution(openRes.input_hash).catch(e => ({ success: false, reason: e.message }));
+        log('开仓状态:', JSON.stringify(status));
+      }
+      state.lastAction = `开仓 ${filteredSignal}`;
+      state.lastTradeTs = Date.now();
+      persistState();
+      updateStatusPanel();
+      await fetchPositions();
+    } catch (e) {
+      log('策略执行失败:', getErrorMessage(e));
+      throw e;
+    }
+  }
+
+  function startBot() {
+    if (state.running) return;
+    assertTradingReady();
+    state.running = true;
+    setBadge(els.botDot, els.botStatus, true, '运行中');
+    const pollMs = Number(els.pollMs.value);
+    state.timer = setInterval(() => runStrategyCycle('timer').catch(() => {}), pollMs);
+    runStrategyCycle('start').catch(() => {});
+    log('Bot 已启动，轮询间隔', String(pollMs / 1000), '秒');
+  }
+
+  function stopBot() {
+    state.running = false;
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+    setBadge(els.botDot, els.botStatus, false, '已停止');
+    log('Bot 已停止');
+  }
+
+  function updateStatusPanel() {
+    els.lastAction.textContent = state.lastAction;
+    els.cooldownUntil.textContent = state.cooldownUntil ? new Date(state.cooldownUntil).toLocaleString('zh-CN', { hour12: false }) : '-';
+    els.todayPnl.textContent = String(state.dayPnl.toFixed(2));
+    updatePortfolioEntry();
+  }
+
+  async function manualOpen() {
+    const side = els.manualSide.value === 'long' ? 'LONG' : 'SHORT';
+    const symbol = els.symbol.value;
+    const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
+    const sig = analyzeSignal(k15, k4h);
+    const plan = buildManualTradePlan(side, sig.price, sig.atr);
+    if (plan.floorAdjusted) {
+      log(`手动参数低于 LeverUp 最低开仓要求，已自动上调保证金到 ${plan.margin.toFixed(2)} ${COLLATERAL_SYMBOL}（约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional）`);
+    }
+    const res = await sendOpenPosition({
+      symbol,
+      isLong: side === 'LONG',
+      margin: plan.margin,
+      qtyBase: plan.qtyBase,
+      price: sig.price,
+      stopLoss: plan.stopLoss,
+      takeProfit: plan.takeProfit
+    });
+    log('手动开仓已发送:', JSON.stringify(res));
+    if (res.input_hash) {
+      const status = await waitExecution(res.input_hash).catch(e => ({ success: false, reason: e.message }));
+      log('手动开仓状态:', JSON.stringify(status));
+    }
+    await fetchPositions();
+  }
+
+  document.addEventListener('click', async (e) => {
+    const closeHash = e.target?.dataset?.close;
+    if (closeHash) {
+      try {
+        const res = await sendClosePosition(closeHash);
+        log('手动平仓已发送:', JSON.stringify(res));
+        if (res.input_hash) {
+          const status = await waitExecution(res.input_hash).catch(err => ({ success: false, reason: err.message }));
+          log('手动平仓状态:', JSON.stringify(status));
+        }
+        await fetchPositions();
+      } catch (err) {
+        log('手动平仓失败:', getErrorMessage(err));
+      }
+    }
+  });
+
+  els.network.addEventListener('change', () => {
+    updateStaticNetworkFields();
+    if (state.traderAddress) {
+      switchToConfiguredNetwork().catch(e => log('切换网络失败:', getErrorMessage(e)));
+    }
+  });
+  els.connectBtn.addEventListener('click', () => connectMetaMask().catch(e => log('连接失败:', getErrorMessage(e))));
+  els.regenerateAgentBtn.addEventListener('click', () => { try { regenerateLocalAgent(); } catch (e) { log(e.message || String(e)); } });
+  els.authorizeAgentBtn.addEventListener('click', () => authorizeLocalAgent().catch(e => log('授权失败:', getErrorMessage(e))));
+  els.revokeAgentBtn.addEventListener('click', () => revokeLocalAgent().catch(e => log('撤销授权失败:', getErrorMessage(e))));
+  els.refreshAuthBtn.addEventListener('click', () => refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e))));
+  els.refreshPosBtn.addEventListener('click', () => fetchPositions().catch(e => log('刷新持仓失败:', getErrorMessage(e))));
+  els.manualOpenBtn.addEventListener('click', () => manualOpen().catch(e => log('手动开仓失败:', getErrorMessage(e))));
+  els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
+  els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
+  els.stopBtn.addEventListener('click', stopBot);
+  els.openPortfolioBtn.addEventListener('click', () => {
+    const url = getPortfolioUrl();
+    if (!url) {
+      log('请先连接 MetaMask，再查看 LeverUp 仓位');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  });
+
+  if (window.ethereum?.on) {
+    window.ethereum.on('accountsChanged', (accounts) => {
+      const [address] = accounts || [];
+      if (!address) {
+        state.traderAddress = '';
+        els.traderAddress.value = '';
+        updatePortfolioEntry();
+        state.agentAuthorized = false;
+        state.currentAuthorizedAgent = ZERO_ADDRESS;
+        state.authStatusNote = '';
+        setBadge(els.mmDot, els.mmStatus, false, '未连接');
+        updateAuthorizationBadge();
+        stopBot();
+        log('MetaMask 已断开连接');
+        return;
+      }
+      state.traderAddress = address;
+      els.traderAddress.value = address;
+      updatePortfolioEntry();
+      setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
+      refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
+      log('MetaMask 账户已切换:', address);
+    });
+    window.ethereum.on('chainChanged', () => {
+      updateStaticNetworkFields();
+      log('检测到链切换，已刷新 RPC 与授权状态');
+    });
+  }
+
+  ensureLocalAgent();
+  updateStaticNetworkFields();
+  updateAuthorizationBadge();
+  updateStatusPanel();
+  updatePortfolioEntry();
+  log('页面已加载。先连接 MetaMask，再用 MetaMask 授权当前本地 Agent。');
+</script>
+</body>
+</html>
