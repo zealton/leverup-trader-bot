@@ -967,10 +967,6 @@
             <label>赢利后冷却分钟</label>
             <input id="winCooldown" type="number" step="1" value="10" />
           </div>
-          <div>
-            <label>日亏损熔断 %</label>
-            <input id="dayStopPct" type="number" step="0.1" value="3" />
-          </div>
         </div>
 
         <div class="row">
@@ -2576,8 +2572,7 @@
       tpRr: Number(els.tpRr.value),
       maxHoldMins: Number(els.maxHoldMins.value),
       lossCooldown: Number(els.lossCooldown.value),
-      winCooldown: Number(els.winCooldown.value),
-      dayStopPct: Number(els.dayStopPct.value)
+      winCooldown: Number(els.winCooldown.value)
     };
   }
 
@@ -3088,11 +3083,6 @@
         .map(entry => `${entry.symbol}:${entry.filteredSignal}${entry.filteredSignal === 'FLAT' ? '' : `(${entry.score.toFixed(1)})`}`)
         .join(' ');
       log(`${trigger} 扫描结果: ${scanSummary}`);
-
-      if (Math.abs(state.dayPnl) >= r.dayStopPct) {
-        log('已触发日亏损熔断，停止新开仓');
-        return;
-      }
 
       let closedAny = false;
       for (const position of positions) {
