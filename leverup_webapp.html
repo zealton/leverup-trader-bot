@@ -940,6 +940,10 @@
   const MIN_MARGIN_USDC = 10;
   const MIN_NOTIONAL_USD = 200;
   const MAX_SYMBOL_LEVERAGE = 100;
+  const MIN_AUTO_LEVERAGE = 10;
+  const AUTO_LEVERAGE_STEP = 5;
+  const AUTO_RISK_BUDGET_TOLERANCE_MULTIPLIER = 1.15;
+  const AUTO_RISK_BUDGET_TOLERANCE_ABS_USD = 0.15;
   const EXECUTION_FEE_USD = 0;
   const OPEN_FEE_RATE = 7 / 10000;
   const MIN_NOTIONAL_CHECK_BUFFER = 0.005;
@@ -1872,10 +1876,8 @@
     };
   }
 
-  function buildAutoTradePlan(side, price, atrValue, sig, leverageDecision = pickAutoLeverage(side, sig)) {
-    const r = getRiskInputs();
-    const leverage = leverageDecision.leverage;
-    const riskBudgetUsd = Math.max(0, r.maxMargin * (r.riskPct / 100));
+  function buildAutoTradePlanForLeverage(side, price, atrValue, leverage, riskInputs, leverageDecision) {
+    const riskBudgetUsd = Math.max(0, riskInputs.maxMargin * (riskInputs.riskPct / 100));
     const { stopDistance, stopLoss, takeProfit } = buildStops(side, price, atrValue);
     if (!Number.isFinite(stopDistance) || stopDistance <= 0) {
       throw new Error('ATR 无效，无法计算止损距离');
@@ -1883,7 +1885,7 @@
 
     const minRequiredNotionalUsd = getMinRequiredNotionalUsd(leverage);
     const minQtyByNotional = minRequiredNotionalUsd / price;
-    const maxPositionSizeUsd = getPositionSizeUsd(r.maxMargin, leverage);
+    const maxPositionSizeUsd = getPositionSizeUsd(riskInputs.maxMargin, leverage);
     const maxQtyByMargin = maxPositionSizeUsd / price;
     if (!Number.isFinite(maxQtyByMargin) || maxQtyByMargin < minQtyByNotional) {
       return null;
@@ -1895,11 +1897,12 @@
     const positionSizeUsd = qtyBase * price;
     const margin = getRequiredMarginForPositionSize(positionSizeUsd, leverage);
     const effectiveRiskUsd = qtyBase * stopDistance;
+    const minTradableRiskUsd = minQtyByNotional * stopDistance;
 
     if (!Number.isFinite(qtyBase) || qtyBase <= 0) {
       return null;
     }
-    if (margin < MIN_MARGIN_USDC || margin > r.maxMargin + 1e-9) {
+    if (margin < MIN_MARGIN_USDC || margin > riskInputs.maxMargin + 1e-9) {
       return null;
     }
 
@@ -1913,12 +1916,81 @@
       takeProfit,
       riskBudgetUsd,
       effectiveRiskUsd,
+      minTradableRiskUsd,
       minRequiredNotionalUsd,
       floorApplied: qtyByRisk < minQtyByNotional,
       leverageCap: leverageDecision.leverageCap,
       atrPct: leverageDecision.atrPct,
       trendGapPct: leverageDecision.trendGapPct,
       emaStretchPct: leverageDecision.emaStretchPct
+    };
+  }
+
+  function getAutoLeverageCandidates(targetLeverage, leverageCap) {
+    const upper = Math.max(MIN_AUTO_LEVERAGE, Math.min(MAX_SYMBOL_LEVERAGE, leverageCap));
+    const values = [];
+    for (let leverage = MIN_AUTO_LEVERAGE; leverage <= upper; leverage += AUTO_LEVERAGE_STEP) {
+      values.push(leverage);
+    }
+    return values.sort((a, b) => {
+      const aPenalty = Math.abs(a - targetLeverage) + (a > targetLeverage ? 0.15 : 0);
+      const bPenalty = Math.abs(b - targetLeverage) + (b > targetLeverage ? 0.15 : 0);
+      if (aPenalty !== bPenalty) return aPenalty - bPenalty;
+      return a - b;
+    });
+  }
+
+  function selectAutoTradePlan(side, sig, riskInputs) {
+    const targetDecision = pickAutoLeverage(side, sig, riskInputs.leverageCap);
+    const riskBudgetUsd = Math.max(0, riskInputs.maxMargin * (riskInputs.riskPct / 100));
+    const budgetCeilingUsd = Math.max(
+      AUTO_RISK_BUDGET_TOLERANCE_ABS_USD,
+      riskBudgetUsd + AUTO_RISK_BUDGET_TOLERANCE_ABS_USD,
+      riskBudgetUsd * AUTO_RISK_BUDGET_TOLERANCE_MULTIPLIER
+    );
+
+    const candidates = getAutoLeverageCandidates(targetDecision.leverage, targetDecision.leverageCap)
+      .map((leverage) => {
+        const decisionForLeverage = { ...targetDecision, leverage };
+        const plan = buildAutoTradePlanForLeverage(side, sig.price, sig.atr, leverage, riskInputs, decisionForLeverage);
+        return plan ? { plan, decisionForLeverage } : null;
+      })
+      .filter(Boolean);
+
+    if (!candidates.length) {
+      return {
+        ok: false,
+        reason: 'margin_insufficient',
+        targetDecision,
+        riskBudgetUsd
+      };
+    }
+
+    const budgetFriendly = candidates.filter(({ plan }) => plan.effectiveRiskUsd <= budgetCeilingUsd);
+    if (budgetFriendly.length) {
+      const selected = budgetFriendly[0];
+      return {
+        ok: true,
+        plan: selected.plan,
+        targetDecision,
+        selectedDecision: selected.decisionForLeverage,
+        riskBudgetUsd,
+        budgetCeilingUsd
+      };
+    }
+
+    const smallestRisk = candidates.reduce((best, current) =>
+      !best || current.plan.effectiveRiskUsd < best.plan.effectiveRiskUsd ? current : best
+    , null);
+
+    return {
+      ok: false,
+      reason: 'risk_budget_too_small',
+      targetDecision,
+      selectedDecision: smallestRisk?.decisionForLeverage || targetDecision,
+      smallestRiskPlan: smallestRisk?.plan || null,
+      riskBudgetUsd,
+      budgetCeilingUsd
     };
   }
 
@@ -2203,21 +2275,40 @@
 
       let openedAny = false;
       for (const entry of openCandidates) {
-        const leverageDecision = pickAutoLeverage(entry.filteredSignal, entry.sig, r.leverageCap);
+        const selection = selectAutoTradePlan(entry.filteredSignal, entry.sig, r);
+        const leverageDecision = selection.selectedDecision || selection.targetDecision;
         entry.leverageDecision = leverageDecision;
         state.latestBySymbol[entry.symbol] = entry;
         if (entry.symbol === getFocusSymbol()) {
           updateFocusedSignalPanel();
         }
-        log(`动态杠杆选择: ${entry.symbol} ${leverageDecision.leverage.toFixed(0)}x / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
+        const targetLeverage = selection.targetDecision?.leverage || leverageDecision.leverage;
+        const leveragePrefix = selection.ok && leverageDecision.leverage !== targetLeverage
+          ? `动态杠杆调整: ${entry.symbol} ${targetLeverage.toFixed(0)}x -> ${leverageDecision.leverage.toFixed(0)}x`
+          : `动态杠杆选择: ${entry.symbol} ${leverageDecision.leverage.toFixed(0)}x`;
+        log(`${leveragePrefix} / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
 
-        const plan = buildAutoTradePlan(entry.filteredSignal, entry.sig.price, entry.sig.atr, entry.sig, leverageDecision);
-        if (!plan) {
-          log(`当前最大保证金与杠杆不足以满足 LeverUp 最低开仓要求，本次 ${entry.symbol} ${entry.filteredSignal} 信号跳过`);
+        if (!selection.ok) {
+          if (selection.reason === 'risk_budget_too_small' && selection.smallestRiskPlan) {
+            log(
+              `${entry.symbol} ${entry.filteredSignal} 跳过: 最小可下单风险约 ${selection.smallestRiskPlan.minTradableRiskUsd.toFixed(2)}U ` +
+              `（${leverageDecision.leverage.toFixed(0)}x / 最低名义价值约 ${selection.smallestRiskPlan.minRequiredNotionalUsd.toFixed(0)}U），` +
+              `高于当前预算 ${selection.riskBudgetUsd.toFixed(2)}U`
+            );
+          } else {
+            log(
+              `${entry.symbol} ${entry.filteredSignal} 跳过: 当前最大保证金 ${r.maxMargin.toFixed(2)} LVUSD ` +
+              `不足以覆盖最小开仓要求（候选杠杆最高 ${selection.targetDecision?.leverage?.toFixed(0) || leverageDecision.leverage.toFixed(0)}x）`
+            );
+          }
           continue;
         }
+        const plan = selection.plan;
         if (plan.floorApplied) {
-          log(`为满足 LeverUp 最低开仓要求，本次 ${entry.symbol} ${entry.filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，高于目标风险预算 ${plan.riskBudgetUsd.toFixed(2)}U`);
+          log(
+            `为满足 LeverUp 最低开仓要求，本次 ${entry.symbol} ${entry.filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；` +
+            `预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，预算上限 ${selection.budgetCeilingUsd.toFixed(2)}U / 目标预算 ${plan.riskBudgetUsd.toFixed(2)}U`
+          );
         }
 
         try {
