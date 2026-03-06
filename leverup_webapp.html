@@ -429,6 +429,42 @@
       font-size: 12px;
       line-height: 1.65;
       color: #d3d7d7;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .log-line {
+      padding: 9px 11px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.05);
+      background: rgba(255,255,255,.025);
+      white-space: pre-wrap;
+      word-break: break-word;
+      box-shadow: inset 3px 0 0 rgba(255,255,255,.05);
+    }
+    .log-time {
+      color: #7e8989;
+      margin-right: 8px;
+    }
+    .log-line.log-info {
+      background: rgba(82,190,255,.08);
+      border-color: rgba(82,190,255,.16);
+      box-shadow: inset 3px 0 0 rgba(82,190,255,.42);
+    }
+    .log-line.log-success {
+      background: rgba(204,255,0,.08);
+      border-color: rgba(204,255,0,.18);
+      box-shadow: inset 3px 0 0 rgba(204,255,0,.48);
+    }
+    .log-line.log-warn {
+      background: rgba(255,174,63,.08);
+      border-color: rgba(255,174,63,.18);
+      box-shadow: inset 3px 0 0 rgba(255,174,63,.45);
+    }
+    .log-line.log-error {
+      background: rgba(255,92,92,.08);
+      border-color: rgba(255,92,92,.18);
+      box-shadow: inset 3px 0 0 rgba(255,92,92,.5);
     }
     #log::-webkit-scrollbar {
       width: 10px;
@@ -1153,9 +1189,47 @@
     return json || {};
   }
 
+  function classifyLogTone(message) {
+    if (/(失败|错误|revert|denied|拒绝|超时|failed|invalid|forbidden|HTTP 4|HTTP 5)/i.test(message)) {
+      return 'error';
+    }
+    if (/(跳过|冷却|无新信号|停止|待确认|不足|预算|回读状态失败|查询失败|读取失败)/i.test(message)) {
+      return 'warn';
+    }
+    if (/(已发送|已确认|已连接|已授权|已启动|恢复|已切换|开仓状态|平仓状态|已刷新|已加载)/i.test(message)) {
+      return 'success';
+    }
+    return 'info';
+  }
+
   function log(...args) {
-    const msg = `[${nowISO()}] ${args.join(' ')}`;
-    els.log.textContent = msg + '\n' + els.log.textContent;
+    const message = args.map(arg => {
+      if (typeof arg === 'string') return arg;
+      if (arg === null || arg === undefined) return String(arg);
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(' ');
+    const line = document.createElement('div');
+    line.className = `log-line log-${classifyLogTone(message)}`;
+
+    const time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = `[${nowISO()}]`;
+
+    const body = document.createElement('span');
+    body.textContent = ` ${message}`;
+
+    line.append(time, body);
+    els.log.prepend(line);
+    while (els.log.childElementCount > 400) {
+      els.log.lastElementChild?.remove();
+    }
   }
 
   function persistState() {
