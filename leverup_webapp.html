@@ -900,8 +900,8 @@
         <div class="stat">
           <div><div class="k">最后动作</div><div id="lastAction" class="v" style="font-size:14px">-</div></div>
           <div><div class="k">冷却到</div><div id="cooldownUntil" class="v" style="font-size:14px">-</div></div>
-          <div><div class="k">今日已实现 PnL（不含开仓费）</div><div id="todayPnl" class="v">0</div></div>
-          <div><div class="k">今日手续费 / 成本 USD</div><div id="todayFees" class="v">0</div></div>
+          <div><div class="k">今日已实现 PnL（已含平仓成本）</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">今日开仓成本 USD</div><div id="todayFees" class="v">0</div></div>
           <div><div class="k">今日净结果 USD</div><div id="todayNet" class="v">0</div></div>
           <div><div class="k">今日交易量 USD</div><div id="todayVolume" class="v">0</div></div>
           <div><div class="k">当前持仓数</div><div id="openCount" class="v">0</div></div>
@@ -1748,7 +1748,6 @@
     try {
       const todayStartMs = getTodayStartMs();
       let totalPnl = 0;
-      let totalFeesUsd = 0;
       let totalOpenCostsUsd = 0;
       let totalVolumeUsd = 0;
       let page = 0;
@@ -1769,12 +1768,10 @@
           }
           if (String(item?.operationType || '') === 'OPEN_MARKET_TRADE') {
             const openCosts = getHistoryOpenCosts(item);
-            totalFeesUsd += openCosts.totalCostUsd;
             totalOpenCostsUsd += openCosts.totalCostUsd;
           }
           if (isCloseTradeHistory(item)) {
             totalPnl += getHistoryPnlAfterFee(item);
-            totalFeesUsd += getHistoryCloseCostBreakdown(item).paidCostUsd;
           }
           if (isExecutedVolumeTradeHistory(item)) {
             totalVolumeUsd += getHistoryExecutedVolumeUsd(item);
@@ -1786,8 +1783,8 @@
       }
 
       state.dayPnl = Number.isFinite(totalPnl) ? totalPnl : 0;
-      state.dayFeesUsd = Number.isFinite(totalFeesUsd) ? totalFeesUsd : 0;
-      state.dayNetUsd = Number.isFinite(totalPnl - totalOpenCostsUsd) ? totalPnl - totalOpenCostsUsd : 0;
+      state.dayFeesUsd = Number.isFinite(totalOpenCostsUsd) ? -totalOpenCostsUsd : 0;
+      state.dayNetUsd = Number.isFinite(state.dayPnl + state.dayFeesUsd) ? state.dayPnl + state.dayFeesUsd : 0;
       state.dayVolumeUsd = Number.isFinite(totalVolumeUsd) ? totalVolumeUsd : 0;
       persistState();
       updateStatusPanel();
