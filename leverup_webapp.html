@@ -870,7 +870,7 @@
         <div class="stat">
           <div><div class="k">最后动作</div><div id="lastAction" class="v" style="font-size:14px">-</div></div>
           <div><div class="k">冷却到</div><div id="cooldownUntil" class="v" style="font-size:14px">-</div></div>
-          <div><div class="k">今日估算已实现 PnL</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">今日已实现 PnL（含费）</div><div id="todayPnl" class="v">0</div></div>
           <div><div class="k">当前持仓数</div><div id="openCount" class="v">0</div></div>
         </div>
         <div class="row" style="margin-top:14px;">
@@ -1077,6 +1077,7 @@
       chainId: 143,
       rpcUrl: 'https://rpc.monad.xyz',
       explorerUrl: 'https://monadscan.com',
+      backendUrl: 'https://service.leverup.xyz',
       keeperUrl: 'https://oneclick-01-keeper.leverup.xyz',
       oneClickAgent: '0x1567FB09f13653f63A047B4F11Fb11fD1D7567d0',
       diamond: '0xea1b8E4aB7f14F7dCA68c5B214303B13078FC5ec',
@@ -1094,6 +1095,7 @@
       chainId: 10143,
       rpcUrl: 'https://testnet-rpc.monad.xyz',
       explorerUrl: 'https://testnet.monadscan.com',
+      backendUrl: 'https://api-testnet.leverup.xyz',
       keeperUrl: 'https://oneclick-01-keeper.leverup.xyz',
       oneClickAgent: '0xd9d2ccF34E80906c6e132B755b0Ed591dc4A9938',
       diamond: '0x1bA73F7ab65D9712D45BE5A8961a4609874f6D13',
@@ -1125,6 +1127,8 @@
   const MAX_AUTO_SLIPPAGE_PCT = 5;
   const AUTO_SLIPPAGE_STEP_PCT = 0.5;
   const PENDING_OPEN_TTL_MS = 3 * 60 * 1000;
+  const DAILY_PNL_HISTORY_PAGE_SIZE = 100;
+  const DAILY_PNL_HISTORY_MAX_PAGES = 5;
   const USDC_PYTH_ID = '0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a';
   const ONE_CLICK_AGENT_ABI = [
     {
@@ -1587,6 +1591,96 @@
     return raw ? raw.trim() : {};
   }
 
+  function toBigIntOrZero(value) {
+    try {
+      if (value === null || value === undefined || value === '') return 0n;
+      return BigInt(value);
+    } catch {
+      return 0n;
+    }
+  }
+
+  function getTodayStartMs() {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now.getTime();
+  }
+
+  function isCloseTradeHistory(item) {
+    const type = String(item?.operationType || '');
+    return type === 'CLOSE_TRADE_SUCCESSFUL' || type === 'EXECUTE_CLOSE_SUCCESSFUL';
+  }
+
+  function getHistoryPnlAfterFee(item) {
+    if (!item?.detail) return 0;
+    const detail = item.detail;
+    if (detail.executionType === 'LIQ') {
+      const collateralRaw = toBigIntOrZero(item.margin ?? item.amountIn);
+      return -Number(formatUnits(collateralRaw, COLLATERAL_DECIMALS));
+    }
+    const pnlRaw = toBigIntOrZero(detail.pnl);
+    const fundingFeeRaw = toBigIntOrZero(detail.fundingFee);
+    const holdingFeeRaw = toBigIntOrZero(detail.holdingFee);
+    const closeFeeRaw = toBigIntOrZero(detail.closeFee);
+    const pnlAfterFeeRaw = pnlRaw + fundingFeeRaw - holdingFeeRaw - closeFeeRaw;
+    return Number(formatUnits(pnlAfterFeeRaw, COLLATERAL_DECIMALS));
+  }
+
+  async function fetchTradeHistoryPage(page = 0, size = DAILY_PNL_HISTORY_PAGE_SIZE) {
+    if (!state.traderAddress) throw new Error('未连接 MetaMask，无法获取交易历史');
+    const params = new URLSearchParams({
+      page: String(page),
+      size: String(size),
+      block_chain: 'MONAD'
+    });
+    const url = `${cfg().backendUrl}/v1/user/${encodeURIComponent(state.traderAddress)}/trade/history?${params.toString()}`;
+    const res = await fetch(url);
+    return parseApiResponse(res, '获取交易历史失败');
+  }
+
+  async function refreshDailyRealizedPnl({ silent = false } = {}) {
+    if (!state.traderAddress) {
+      state.dayPnl = 0;
+      updateStatusPanel();
+      return 0;
+    }
+    try {
+      const todayStartMs = getTodayStartMs();
+      let total = 0;
+      let page = 0;
+      let totalPages = DAILY_PNL_HISTORY_MAX_PAGES;
+      let reachedOlderEntries = false;
+
+      while (page < Math.min(totalPages, DAILY_PNL_HISTORY_MAX_PAGES) && !reachedOlderEntries) {
+        const response = await fetchTradeHistoryPage(page, DAILY_PNL_HISTORY_PAGE_SIZE);
+        const rows = Array.isArray(response?.content) ? response.content : [];
+        totalPages = Number.isFinite(response?.totalPages) ? response.totalPages : totalPages;
+
+        for (const item of rows) {
+          const blockTimeMs = Date.parse(item?.blockTime || '');
+          if (!Number.isFinite(blockTimeMs)) continue;
+          if (blockTimeMs < todayStartMs) {
+            reachedOlderEntries = true;
+            continue;
+          }
+          if (!isCloseTradeHistory(item)) continue;
+          total += getHistoryPnlAfterFee(item);
+        }
+
+        if (!rows.length) break;
+        page += 1;
+      }
+
+      state.dayPnl = Number.isFinite(total) ? total : 0;
+      persistState();
+      updateStatusPanel();
+      return state.dayPnl;
+    } catch (error) {
+      if (!silent) log('刷新今日已实现 PnL 失败:', getErrorMessage(error));
+      return state.dayPnl;
+    }
+  }
+
   function normalizeTradingSubmitResponse(result) {
     if (typeof result === 'string') {
       return { input_hash: result };
@@ -1923,6 +2017,7 @@
     log('已连接 MetaMask:', address);
     refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
     refreshCollateralApprovalStatus({ silent: true }).catch(e => log('LVUSD 状态查询失败:', getErrorMessage(e)));
+    refreshDailyRealizedPnl({ silent: true }).catch(e => log('今日已实现 PnL 刷新失败:', getErrorMessage(e)));
   }
 
   function getDirectionFilter(signal) {
@@ -2868,6 +2963,7 @@
         persistState();
         updateStatusPanel();
         await fetchTrackedPositions();
+        await refreshDailyRealizedPnl({ silent: true });
         return;
       }
 
@@ -3111,6 +3207,7 @@
           throw new Error(`手动平仓请求未返回 input_hash: ${closeHash}`);
         }
         await fetchTrackedPositions();
+        await refreshDailyRealizedPnl({ silent: true });
       } catch (err) {
         log('手动平仓失败:', getErrorMessage(err));
       }
@@ -3130,7 +3227,14 @@
   els.authorizeAgentBtn.addEventListener('click', () => authorizeLocalAgent().catch(e => log('授权失败:', getErrorMessage(e))));
   els.revokeAgentBtn.addEventListener('click', () => revokeLocalAgent().catch(e => log('撤销授权失败:', getErrorMessage(e))));
   els.refreshAuthBtn.addEventListener('click', () => refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e))));
-  els.refreshPosBtn.addEventListener('click', () => fetchTrackedPositions().catch(e => log('刷新持仓失败:', getErrorMessage(e))));
+  els.refreshPosBtn.addEventListener('click', async () => {
+    try {
+      await fetchTrackedPositions();
+      await refreshDailyRealizedPnl({ silent: true });
+    } catch (e) {
+      log('刷新持仓失败:', getErrorMessage(e));
+    }
+  });
   els.manualOpenBtn.addEventListener('click', () => manualOpen().catch(e => log('手动开仓失败:', getErrorMessage(e))));
   els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
   els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
@@ -3153,6 +3257,7 @@
       const [address] = accounts || [];
       if (!address) {
         state.traderAddress = '';
+        state.dayPnl = 0;
         els.traderAddress.value = '';
         updatePortfolioEntry();
         updateCollateralStatusUi({ note: '未连接' });
@@ -3162,21 +3267,28 @@
         state.authStatusNote = '';
         setBadge(els.mmDot, els.mmStatus, false, '未连接');
         updateAuthorizationBadge();
+        updateStatusPanel();
         stopBot();
         log('MetaMask 已断开连接');
         return;
       }
       state.traderAddress = address;
+      state.dayPnl = 0;
       els.traderAddress.value = address;
       updatePortfolioEntry();
       hydratePendingOpenState();
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
       setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
       refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
+      refreshDailyRealizedPnl({ silent: true }).catch(e => log('账户切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
+      updateStatusPanel();
       log('MetaMask 账户已切换:', address);
     });
     window.ethereum.on('chainChanged', () => {
       updateStaticNetworkFields();
+      if (state.traderAddress) {
+        refreshDailyRealizedPnl({ silent: true }).catch(e => log('链切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
+      }
       log('检测到链切换，已刷新 RPC 与授权状态');
     });
   }
