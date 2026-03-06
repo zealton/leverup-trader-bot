@@ -996,6 +996,7 @@
   const COLLATERAL_DECIMALS = 18;
   const MAX_AUTO_SLIPPAGE_PCT = 5;
   const AUTO_SLIPPAGE_STEP_PCT = 0.5;
+  const PENDING_OPEN_TTL_MS = 3 * 60 * 1000;
   const USDC_PYTH_ID = '0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a';
   const ONE_CLICK_AGENT_ABI = [
     {
@@ -1111,7 +1112,9 @@
     cooldownUntil: 0,
     dayPnl: Number(localStorage.getItem('leverup_dayPnl') || '0'),
     lastAction: localStorage.getItem('leverup_lastAction') || '-',
-    lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0')
+    lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0'),
+    pendingOpenBySymbol: {},
+    strategyInFlight: false
   };
 
   function cfg() {
@@ -1151,6 +1154,73 @@
 
   function shortAddress(address) {
     return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  }
+
+  function getPendingOpenStorageKey() {
+    if (!state.traderAddress) return '';
+    return `leverup_pending_open_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
+  }
+
+  function persistPendingOpenState() {
+    const key = getPendingOpenStorageKey();
+    if (!key) return;
+    const entries = Object.entries(state.pendingOpenBySymbol || {})
+      .filter(([, pending]) => pending?.expiresAt > Date.now());
+    if (!entries.length) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  }
+
+  function cleanupExpiredPendingOpens() {
+    const now = Date.now();
+    let changed = false;
+    for (const [symbol, pending] of Object.entries(state.pendingOpenBySymbol || {})) {
+      if (!pending?.expiresAt || pending.expiresAt <= now) {
+        delete state.pendingOpenBySymbol[symbol];
+        changed = true;
+      }
+    }
+    if (changed) persistPendingOpenState();
+  }
+
+  function hydratePendingOpenState() {
+    const key = getPendingOpenStorageKey();
+    if (!key) {
+      state.pendingOpenBySymbol = {};
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(key);
+      state.pendingOpenBySymbol = raw ? JSON.parse(raw) : {};
+    } catch {
+      state.pendingOpenBySymbol = {};
+    }
+    cleanupExpiredPendingOpens();
+  }
+
+  function setPendingOpen(symbol, payload) {
+    state.pendingOpenBySymbol[symbol] = {
+      requestedAt: Date.now(),
+      expiresAt: Date.now() + PENDING_OPEN_TTL_MS,
+      ...payload
+    };
+    persistPendingOpenState();
+  }
+
+  function clearPendingOpen(symbol) {
+    if (!state.pendingOpenBySymbol[symbol]) return;
+    delete state.pendingOpenBySymbol[symbol];
+    persistPendingOpenState();
+  }
+
+  function getPendingOpenLabel(symbol) {
+    const pending = state.pendingOpenBySymbol[symbol];
+    if (!pending) return '';
+    if (pending.status === 'submitting') return '提交中';
+    if (pending.inputHash) return `${pending.inputHash.slice(0, 10)}...`;
+    return '待确认';
   }
 
   function formatCollateralDisplay(amount) {
@@ -1464,9 +1534,11 @@
       transport: window.ethereum ? custom(window.ethereum) : http(els.rpcUrl.value)
     });
     if (state.traderAddress) {
+      hydratePendingOpenState();
       refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e)));
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('刷新 LVUSD 状态失败:', getErrorMessage(e)));
     } else {
+      state.pendingOpenBySymbol = {};
       updateCollateralStatusUi({ note: '未连接' });
     }
   }
@@ -1716,6 +1788,7 @@
     updatePortfolioEntry();
     ensureLocalAgent();
     hydrateKnownAuthorizationFromCache();
+    hydratePendingOpenState();
     setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
     log('已连接 MetaMask:', address);
     refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
@@ -2492,16 +2565,22 @@
 
   async function fetchTrackedPositions() {
     if (!state.traderAddress) {
+      state.pendingOpenBySymbol = {};
       renderPositions([]);
       els.openCount.textContent = '0';
       return [];
     }
+    cleanupExpiredPendingOpens();
     const settled = await Promise.allSettled(getTrackedSymbols().map(symbol => fetchPositionsForSymbol(symbol)));
     const positions = settled.flatMap((result, index) => {
       if (result.status === 'fulfilled') return result.value;
       log(`${getTrackedSymbols()[index]} 持仓读取失败:`, getErrorMessage(result.reason));
       return [];
     });
+    const symbolsWithPosition = new Set(positions.map(position => position.market || resolveSymbolFromPairBase(position.pairBase)));
+    for (const symbol of symbolsWithPosition) {
+      clearPendingOpen(symbol);
+    }
     renderPositions(positions);
     els.openCount.textContent = String(positions.length);
     return positions;
@@ -2544,8 +2623,14 @@
   }
 
   async function runStrategyCycle(trigger = 'bot') {
+    if (state.strategyInFlight) {
+      log(`${trigger} 上一轮策略仍在执行，跳过重入`);
+      return;
+    }
+    state.strategyInFlight = true;
     try {
       assertTradingReady();
+      cleanupExpiredPendingOpens();
       if (Date.now() < state.cooldownUntil) {
         log('仍在冷却期，跳过本次策略执行');
         return;
@@ -2619,9 +2704,18 @@
         return;
       }
 
+      const pendingCandidates = marketEntries
+        .filter(entry => entry.filteredSignal !== 'FLAT')
+        .filter(entry => !(positionsBySymbol.get(entry.symbol)?.length))
+        .filter(entry => !!state.pendingOpenBySymbol[entry.symbol]);
+      for (const entry of pendingCandidates) {
+        log(`${entry.symbol} ${entry.filteredSignal} 跳过: 已有待确认开仓 ${getPendingOpenLabel(entry.symbol)}`);
+      }
+
       const openCandidates = marketEntries
         .filter(entry => entry.filteredSignal !== 'FLAT')
         .filter(entry => !(positionsBySymbol.get(entry.symbol)?.length))
+        .filter(entry => !state.pendingOpenBySymbol[entry.symbol])
         .sort((a, b) => b.score - a.score);
 
       if (!openCandidates.length) {
@@ -2674,6 +2768,11 @@
         }
 
         try {
+          setPendingOpen(entry.symbol, {
+            side: entry.filteredSignal,
+            status: 'submitting',
+            inputHash: ''
+          });
           const openRes = await sendOpenPositionWithAdaptiveSlippage({
             symbol: entry.symbol,
             isLong: entry.filteredSignal === 'LONG',
@@ -2685,13 +2784,20 @@
           });
           log(`已发送开仓请求: ${entry.symbol} ${entry.filteredSignal}`, JSON.stringify(openRes));
           if (openRes.input_hash) {
+            setPendingOpen(entry.symbol, {
+              side: entry.filteredSignal,
+              status: 'submitted',
+              inputHash: openRes.input_hash
+            });
             const rawStatus = await waitExecution(openRes.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
             const status = normalizeExecutionStatus(rawStatus);
             log(`开仓状态: ${entry.symbol}`, JSON.stringify(status));
             if (status.executed && !status.success) {
+              clearPendingOpen(entry.symbol);
               throw new Error(getExecutionFailureReason(status));
             }
           } else {
+            clearPendingOpen(entry.symbol);
             log(`开仓请求未返回 input_hash: ${entry.symbol} ${entry.filteredSignal}`);
             throw new Error('keeper 未返回 input_hash，无法确认开仓执行状态');
           }
@@ -2699,6 +2805,7 @@
           state.lastTradeTs = Date.now();
           openedAny = true;
         } catch (openError) {
+          clearPendingOpen(entry.symbol);
           log(`${entry.symbol} 开仓失败:`, getErrorMessage(openError));
         }
       }
@@ -2711,6 +2818,8 @@
     } catch (e) {
       log('策略执行失败:', getErrorMessage(e));
       throw e;
+    } finally {
+      state.strategyInFlight = false;
     }
   }
 
@@ -2743,6 +2852,14 @@
   async function manualOpen() {
     const side = els.manualSide.value === 'long' ? 'LONG' : 'SHORT';
     const symbol = getFocusSymbol();
+    cleanupExpiredPendingOpens();
+    if (state.pendingOpenBySymbol[symbol]) {
+      throw new Error(`${symbol} 已有待确认开仓 ${getPendingOpenLabel(symbol)}，请先等待结果或刷新持仓`);
+    }
+    const existingPositions = await fetchPositionsForSymbol(symbol);
+    if (existingPositions.length) {
+      throw new Error(`${symbol} 已有持仓，当前版本不允许同一市场重复开仓`);
+    }
     const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
     const sig = analyzeSignal(k15, k4h);
     state.latest = sig;
@@ -2761,27 +2878,44 @@
     if (plan.floorAdjusted) {
       log(`手动参数低于 LeverUp 最低开仓要求，已自动上调保证金到 ${plan.margin.toFixed(2)} ${COLLATERAL_SYMBOL}（约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional）`);
     }
-    const res = await sendOpenPositionWithAdaptiveSlippage({
-      symbol,
-      isLong: side === 'LONG',
-      margin: plan.margin,
-      qtyBase: plan.qtyBase,
-      price: sig.price,
-      stopLoss: plan.stopLoss,
-      takeProfit: plan.takeProfit
-    });
-    log('手动开仓已发送:', JSON.stringify(res));
-    if (res.input_hash) {
-      const rawStatus = await waitExecution(res.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
-      const status = normalizeExecutionStatus(rawStatus);
-      log('手动开仓状态:', JSON.stringify(status));
-      if (status.executed && !status.success) {
-        throw new Error(getExecutionFailureReason(status));
+    try {
+      setPendingOpen(symbol, {
+        side,
+        status: 'submitting',
+        inputHash: ''
+      });
+      const res = await sendOpenPositionWithAdaptiveSlippage({
+        symbol,
+        isLong: side === 'LONG',
+        margin: plan.margin,
+        qtyBase: plan.qtyBase,
+        price: sig.price,
+        stopLoss: plan.stopLoss,
+        takeProfit: plan.takeProfit
+      });
+      log('手动开仓已发送:', JSON.stringify(res));
+      if (res.input_hash) {
+        setPendingOpen(symbol, {
+          side,
+          status: 'submitted',
+          inputHash: res.input_hash
+        });
+        const rawStatus = await waitExecution(res.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
+        const status = normalizeExecutionStatus(rawStatus);
+        log('手动开仓状态:', JSON.stringify(status));
+        if (status.executed && !status.success) {
+          clearPendingOpen(symbol);
+          throw new Error(getExecutionFailureReason(status));
+        }
+      } else {
+        clearPendingOpen(symbol);
+        throw new Error(`手动开仓请求未返回 input_hash: ${symbol} ${side}`);
       }
-    } else {
-      throw new Error(`手动开仓请求未返回 input_hash: ${symbol} ${side}`);
+      await fetchTrackedPositions();
+    } catch (error) {
+      clearPendingOpen(symbol);
+      throw error;
     }
-    await fetchTrackedPositions();
   }
 
   document.addEventListener('click', async (e) => {
@@ -2842,11 +2976,12 @@
     window.ethereum.on('accountsChanged', (accounts) => {
       const [address] = accounts || [];
       if (!address) {
-      state.traderAddress = '';
-      els.traderAddress.value = '';
-      updatePortfolioEntry();
-      updateCollateralStatusUi({ note: '未连接' });
-      state.agentAuthorized = false;
+        state.traderAddress = '';
+        els.traderAddress.value = '';
+        updatePortfolioEntry();
+        updateCollateralStatusUi({ note: '未连接' });
+        state.pendingOpenBySymbol = {};
+        state.agentAuthorized = false;
         state.currentAuthorizedAgent = ZERO_ADDRESS;
         state.authStatusNote = '';
         setBadge(els.mmDot, els.mmStatus, false, '未连接');
@@ -2858,6 +2993,7 @@
       state.traderAddress = address;
       els.traderAddress.value = address;
       updatePortfolioEntry();
+      hydratePendingOpenState();
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
       setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
       refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
