@@ -784,11 +784,11 @@
 
       <div class="hero-grid">
         <div>
-          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL / MON 策略执行</p>
+          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL / XRP / DOGE / MON 策略执行</p>
           <div class="market-pills">
             <span><strong>LVUSD</strong> collateral</span>
             <span>MetaMask delegated agent</span>
-            <span>BTC / ETH / SOL / MON</span>
+            <span>BTC / ETH / SOL / XRP / DOGE / MON</span>
           </div>
           <div class="usage-guide">
             <h3>使用步骤</h3>
@@ -796,7 +796,7 @@
               <li><strong>连接 MetaMask</strong>，确认钱包已切到正确网络。</li>
               <li><strong>授权 LVUSD</strong>，确保钱包对 LeverUp 合约的 collateral allowance 足够。</li>
               <li><strong>授权 Agent</strong>，让当前浏览器本地 Trader Agent 获得 1CT 签名权限。</li>
-              <li><strong>启动 Bot</strong>，让它持续扫描 BTC / ETH / SOL / MON 并自动执行。</li>
+              <li><strong>启动 Bot</strong>，让它持续扫描 BTC / ETH / SOL / XRP / DOGE / MON 并自动执行。</li>
             </ol>
           </div>
         </div>
@@ -1006,8 +1006,8 @@
         </div>
 
         <div class="note">
-          BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x，MON/USD 当前上限为 25x。
-          Bot 现在会固定扫描 BTC / ETH / SOL / MON 四个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
+          BTC / ETH / SOL / XRP 当前普通交易对按 LeverUp 官方前端配置上限为 100x，DOGE/USD 当前上限为 50x，MON/USD 当前上限为 25x。
+          Bot 现在会固定扫描 BTC / ETH / SOL / XRP / DOGE / MON 六个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           当前默认风控也偏向“少跳过、多出手”：单笔风险默认 3.0%，止损默认 1.2 ATR，自动计划器允许在预算附近做适度超配。
@@ -1036,6 +1036,8 @@
               <option value="BTC">BTC</option>
               <option value="ETH">ETH</option>
               <option value="SOL">SOL</option>
+              <option value="XRP">XRP</option>
+              <option value="DOGE">DOGE</option>
               <option value="MON">MON</option>
             </select>
           </div>
@@ -1058,12 +1060,14 @@
 
         <div class="btns">
           <button id="manualOpenBtn">手动开仓</button>
+          <button id="closeProfitableBtn" class="good">一键平盈利仓位</button>
           <button id="refreshPosBtn" class="secondary">刷新持仓</button>
         </div>
 
         <div class="note">
           页面默认使用 LVUSD 作为 collateral，并提交 LeverUp 1CT 的 send-open-position / send-close-position 请求。关闭仓位时会先链上读取 getPositionsV2 获得 positionHash。
           你的钱包里需要先有 LVUSD，并完成对 LeverUp 合约的 LVUSD 授权；现在可以直接点击上方“授权 LVUSD”。
+          “一键平盈利仓位”会按当前最新参考价估算浮盈，大于 0 的仓位会逐个发起平仓。
           本工具不保证盈利；自动仓位会按 `最大保证金 x 风险预算%` 反推仓位，避免继续错误复用手动面板参数。
         </div>
 
@@ -1120,6 +1124,8 @@
         BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
         ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
         SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
+        XRP: { pairBase: '0xaeb724422620edb430dcaf22aeeff2e9388a578c', pythId: '0xec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8', maxLeverage: 100, historyTicker: 'Crypto.XRP/USD', historySource: 'binance' },
+        DOGE: { pairBase: '0xba2ae424d960c26247dd6c32edc70b295c744c43', pythId: '0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c', maxLeverage: 50, historyTicker: 'Crypto.DOGE/USD', historySource: 'binance' },
         MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
     },
@@ -1138,6 +1144,8 @@
         BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
         ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
         SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
+        XRP: { pairBase: '0xaeb724422620edb430dcaf22aeeff2e9388a578c', pythId: '0xec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8', maxLeverage: 100, historyTicker: 'Crypto.XRP/USD', historySource: 'binance' },
+        DOGE: { pairBase: '0xba2ae424d960c26247dd6c32edc70b295c744c43', pythId: '0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c', maxLeverage: 50, historyTicker: 'Crypto.DOGE/USD', historySource: 'binance' },
         MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
     }
@@ -2989,6 +2997,31 @@
       </tr>`).join('');
   }
 
+  function getPositionEntryPrice(position) {
+    return Number(formatUnits(position.entryPrice, 18));
+  }
+
+  function getPositionQtyBase(position) {
+    return Number(formatUnits(position.qty, 10));
+  }
+
+  function estimatePositionGrossPnlUsd(position, markPrice) {
+    const entryPrice = getPositionEntryPrice(position);
+    const qtyBase = getPositionQtyBase(position);
+    if (!Number.isFinite(entryPrice) || !Number.isFinite(qtyBase) || !Number.isFinite(markPrice)) return NaN;
+    return (position.isLong ? markPrice - entryPrice : entryPrice - markPrice) * qtyBase;
+  }
+
+  async function ensureMarketEntry(symbol, { force = false } = {}) {
+    const existing = state.latestBySymbol[symbol];
+    if (!force && existing?.sig && Number.isFinite(existing.sig.price)) {
+      return existing;
+    }
+    const analyzed = await analyzeMarketSymbol(symbol);
+    state.latestBySymbol[symbol] = analyzed;
+    return analyzed;
+  }
+
   function shouldCloseTrackedPosition(position, sig, filteredSignal, riskInputs) {
     const entry = Number(formatUnits(position.entryPrice, 18));
     const isLong = !!position.isLong;
@@ -3032,7 +3065,7 @@
       });
 
       if (!marketEntries.length) {
-        throw new Error('三个市场的行情都未能成功获取');
+        throw new Error('当前启用市场的行情都未能成功获取');
       }
 
       state.latest = marketEntries[0].sig;
@@ -3308,6 +3341,94 @@
     }
   }
 
+  async function closeProfitablePositions() {
+    assertTradingReady();
+    if (state.strategyInFlight) {
+      throw new Error('当前有策略或仓位动作正在执行，请稍后再试');
+    }
+    state.strategyInFlight = true;
+    if (els.closeProfitableBtn) els.closeProfitableBtn.disabled = true;
+    try {
+      const positions = await fetchTrackedPositions();
+      if (!positions.length) {
+        log('暂无持仓，无需一键平盈利仓位');
+        return;
+      }
+
+      const markets = [...new Set(positions.map(position => position.market || resolveSymbolFromPairBase(position.pairBase)))];
+      const marketEntries = {};
+      const settled = await Promise.allSettled(markets.map(symbol => ensureMarketEntry(symbol, { force: true })));
+      settled.forEach((result, index) => {
+        const symbol = markets[index];
+        if (result.status === 'fulfilled') {
+          marketEntries[symbol] = result.value;
+        } else {
+          log(`${symbol} 盈利平仓估值失败:`, getErrorMessage(result.reason));
+        }
+      });
+      updateFocusedSignalPanel();
+
+      const winners = positions
+        .map(position => {
+          const market = position.market || resolveSymbolFromPairBase(position.pairBase);
+          const marketEntry = marketEntries[market];
+          const markPrice = marketEntry?.sig?.price;
+          const estPnlUsd = estimatePositionGrossPnlUsd(position, markPrice);
+          return {
+            market,
+            position,
+            markPrice,
+            entryPrice: getPositionEntryPrice(position),
+            estPnlUsd
+          };
+        })
+        .filter(item => Number.isFinite(item.estPnlUsd) && item.estPnlUsd > 0.0001)
+        .sort((a, b) => b.estPnlUsd - a.estPnlUsd);
+
+      if (!winners.length) {
+        log('当前没有估算为盈利的仓位');
+        return;
+      }
+
+      let closedCount = 0;
+      for (const winner of winners) {
+        log(
+          `盈利平仓候选: ${winner.market} estPnL ${winner.estPnlUsd.toFixed(2)}U / ` +
+          `entry ${formatPrice(winner.entryPrice)} / mark ${formatPrice(winner.markPrice)}`
+        );
+        try {
+          const res = await sendClosePosition(winner.position.positionHash);
+          log(`盈利仓位平仓已发送: ${winner.market}`, JSON.stringify(res));
+          if (!res.input_hash) {
+            throw new Error(`盈利仓位平仓请求未返回 input_hash: ${winner.market}`);
+          }
+          const rawStatus = await waitExecution(res.input_hash).catch(err => ({ executed: true, success: false, reason: err.message }));
+          const status = normalizeExecutionStatus(rawStatus);
+          log(`盈利仓位平仓状态: ${winner.market}`, JSON.stringify(status));
+          if (status.executed && !status.success) {
+            throw new Error(getExecutionFailureReason(status));
+          }
+          state.lastAction = `盈利平仓 ${winner.market}`;
+          state.lastTradeTs = Date.now();
+          closedCount += 1;
+        } catch (error) {
+          log(`${winner.market} 盈利平仓失败:`, getErrorMessage(error));
+        }
+      }
+
+      if (closedCount > 0) {
+        persistState();
+        updateStatusPanel();
+        await fetchTrackedPositions();
+        await refreshDailyRealizedPnl({ silent: true });
+      }
+      log(`盈利仓位一键平仓完成: 成功 ${closedCount} / 候选 ${winners.length}`);
+    } finally {
+      state.strategyInFlight = false;
+      if (els.closeProfitableBtn) els.closeProfitableBtn.disabled = false;
+    }
+  }
+
   document.addEventListener('click', async (e) => {
     const snapshot = e.target?.closest?.('[data-symbol]');
     if (snapshot?.dataset?.symbol && cfg().symbols[snapshot.dataset.symbol]) {
@@ -3363,6 +3484,7 @@
     }
   });
   els.manualOpenBtn.addEventListener('click', () => manualOpen().catch(e => log('手动开仓失败:', getErrorMessage(e))));
+  els.closeProfitableBtn.addEventListener('click', () => closeProfitablePositions().catch(e => log('一键平盈利仓位失败:', getErrorMessage(e))));
   els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
   els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
   els.stopBtn.addEventListener('click', stopBot);
