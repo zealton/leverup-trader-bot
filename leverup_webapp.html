@@ -680,8 +680,21 @@
           </div>
         </div>
 
+        <div class="row">
+          <div>
+            <label>LVUSD 余额</label>
+            <input id="lvusdBalance" readonly class="mono" placeholder="连接 MetaMask 后检查" />
+          </div>
+          <div>
+            <label>LVUSD -> LeverUp 授权</label>
+            <input id="collateralAllowance" readonly class="mono" placeholder="连接 MetaMask 后检查" />
+          </div>
+        </div>
+
         <div class="btns">
           <button id="connectBtn">连接 MetaMask</button>
+          <button id="approveCollateralBtn" class="secondary">授权 LVUSD</button>
+          <button id="refreshCollateralBtn" class="secondary">刷新 LVUSD</button>
           <button id="regenerateAgentBtn" class="secondary">重置本地 Agent</button>
           <button id="authorizeAgentBtn" class="secondary">授权 Agent</button>
           <button id="revokeAgentBtn" class="secondary">撤销授权</button>
@@ -897,7 +910,7 @@
 
         <div class="note">
           页面默认使用 LVUSD 作为 collateral，并提交 LeverUp 1CT 的 send-open-position / send-close-position 请求。关闭仓位时会先链上读取 getPositionsV2 获得 positionHash。
-          你的钱包里需要先有 LVUSD，并完成对 LeverUp 合约的 LVUSD 授权。
+          你的钱包里需要先有 LVUSD，并完成对 LeverUp 合约的 LVUSD 授权；现在可以直接点击上方“授权 LVUSD”。
           本工具不保证盈利；自动仓位会按 `最大保证金 x 风险预算%` 反推仓位，避免继续错误复用手动面板参数。
         </div>
 
@@ -1041,6 +1054,30 @@
       ]
     }]
   }];
+  const ERC20_ABI = [
+    {
+      type: 'function',
+      name: 'allowance',
+      stateMutability: 'view',
+      inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
+      outputs: [{ name: '', type: 'uint256' }]
+    },
+    {
+      type: 'function',
+      name: 'balanceOf',
+      stateMutability: 'view',
+      inputs: [{ name: 'account', type: 'address' }],
+      outputs: [{ name: '', type: 'uint256' }]
+    },
+    {
+      type: 'function',
+      name: 'approve',
+      stateMutability: 'nonpayable',
+      inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }],
+      outputs: [{ name: '', type: 'bool' }]
+    }
+  ];
+  const MAX_UINT256 = (1n << 256n) - 1n;
 
   const OPEN_TYPES = {
     OneClickOpenPosition: [
@@ -1122,6 +1159,157 @@
 
   function shortAddress(address) {
     return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  }
+
+  function formatCollateralDisplay(amount) {
+    if (amount === null || amount === undefined) return '-';
+    const formatted = Number(formatUnits(amount, COLLATERAL_DECIMALS));
+    if (!Number.isFinite(formatted)) return String(amount);
+    if (formatted >= 1e12) return '已无限授权';
+    if (formatted >= 1000) return `${formatted.toFixed(2)} ${COLLATERAL_SYMBOL}`;
+    return `${formatted.toFixed(4)} ${COLLATERAL_SYMBOL}`;
+  }
+
+  function getRequiredCollateralAmount(amount) {
+    const numeric = Number(amount);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0n;
+    return parseUnits(numeric.toFixed(COLLATERAL_DECIMALS), COLLATERAL_DECIMALS);
+  }
+
+  function decodeRevertReasonHex(value) {
+    if (typeof value !== 'string' || !value.startsWith('0x08c379a0')) return value;
+    try {
+      const data = value.slice(10);
+      const len = Number.parseInt(data.slice(64, 128), 16);
+      const reasonHex = data.slice(128, 128 + len * 2);
+      const bytes = reasonHex.match(/.{1,2}/g)?.map(byte => Number.parseInt(byte, 16)) || [];
+      return new TextDecoder().decode(new Uint8Array(bytes)) || value;
+    } catch {
+      return value;
+    }
+  }
+
+  function getExecutionFailureReason(status) {
+    return decodeRevertReasonHex(status?.reason) || '链上执行失败';
+  }
+
+  function normalizeExecutionStatus(status) {
+    if (!status || typeof status !== 'object') return status;
+    return {
+      ...status,
+      reason: status.reason ? getExecutionFailureReason(status) : status.reason
+    };
+  }
+
+  function updateCollateralStatusUi({ balance = null, allowance = null, note = '' } = {}) {
+    if (!els.lvusdBalance || !els.collateralAllowance) return;
+    els.lvusdBalance.value = note || formatCollateralDisplay(balance);
+    if (allowance !== null && allowance !== undefined) {
+      const allowanceLabel = allowance >= 10n ** 30n ? '已无限授权' : formatCollateralDisplay(allowance);
+      els.collateralAllowance.value = allowanceLabel;
+    } else {
+      els.collateralAllowance.value = note || '-';
+    }
+  }
+
+  function getReadClient() {
+    if (state.publicClient) return state.publicClient;
+    state.publicClient = createPublicClient({
+      transport: window.ethereum ? custom(window.ethereum) : http(els.rpcUrl.value)
+    });
+    return state.publicClient;
+  }
+
+  async function readCollateralState() {
+    if (!state.traderAddress) return { balance: 0n, allowance: 0n };
+    const client = getReadClient();
+    const [balance, allowance] = await Promise.all([
+      client.readContract({
+        address: cfg().lvusd,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [state.traderAddress]
+      }),
+      client.readContract({
+        address: cfg().lvusd,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [state.traderAddress, cfg().diamond]
+      })
+    ]);
+    return { balance, allowance };
+  }
+
+  async function refreshCollateralApprovalStatus({ silent = false } = {}) {
+    if (!state.traderAddress) {
+      updateCollateralStatusUi({ note: '未连接' });
+      return { balance: 0n, allowance: 0n };
+    }
+    try {
+      const result = await readCollateralState();
+      updateCollateralStatusUi(result);
+      return result;
+    } catch (error) {
+      updateCollateralStatusUi({ note: '读取失败' });
+      if (!silent) {
+        throw error;
+      }
+      return { balance: 0n, allowance: 0n };
+    }
+  }
+
+  async function approveCollateralToken() {
+    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    if (!state.traderAddress) throw new Error('请先连接 MetaMask');
+    await switchToConfiguredNetwork();
+    const client = getReadClient();
+    let gas;
+    try {
+      gas = await client.estimateContractGas({
+        address: cfg().lvusd,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        account: state.traderAddress,
+        args: [cfg().diamond, MAX_UINT256]
+      });
+    } catch (error) {
+      throw new Error(`LVUSD 授权交易预估失败: ${getErrorMessage(error)}`);
+    }
+    const data = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [cfg().diamond, MAX_UINT256]
+    });
+    const txHash = await providerRequest('eth_sendTransaction', [{
+      from: state.traderAddress,
+      to: cfg().lvusd,
+      data,
+      gas: `0x${gas.toString(16)}`
+    }]);
+    log('已发送 LVUSD 授权交易:', txHash);
+    const receipt = await waitForTransactionReceiptByProvider(txHash);
+    if (!receipt) {
+      log('LVUSD 授权交易已发送，但暂未拿到回执');
+      return txHash;
+    }
+    if (receipt.status !== '0x1') {
+      throw new Error('LVUSD 授权交易链上执行失败');
+    }
+    await refreshCollateralApprovalStatus({ silent: true });
+    log('LVUSD 授权已确认:', txHash);
+    return txHash;
+  }
+
+  async function assertCollateralReady(requiredMargin) {
+    const { balance, allowance } = await readCollateralState();
+    updateCollateralStatusUi({ balance, allowance });
+    const requiredAmount = getRequiredCollateralAmount(requiredMargin);
+    if (balance < requiredAmount) {
+      throw new Error(`LVUSD 余额不足: 当前 ${formatCollateralDisplay(balance)}，需要至少 ${requiredMargin.toFixed(4)} ${COLLATERAL_SYMBOL}`);
+    }
+    if (allowance < requiredAmount) {
+      throw new Error(`LVUSD allowance 不足: 当前 ${formatCollateralDisplay(allowance)}，需要至少 ${requiredMargin.toFixed(4)} ${COLLATERAL_SYMBOL}。请先点击“授权 LVUSD”`);
+    }
   }
 
   function getPortfolioUrl() {
@@ -1285,6 +1473,9 @@
     });
     if (state.traderAddress) {
       refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e)));
+      refreshCollateralApprovalStatus({ silent: true }).catch(e => log('刷新 LVUSD 状态失败:', getErrorMessage(e)));
+    } else {
+      updateCollateralStatusUi({ note: '未连接' });
     }
   }
 
@@ -1536,6 +1727,7 @@
     setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
     log('已连接 MetaMask:', address);
     refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
+    refreshCollateralApprovalStatus({ silent: true }).catch(e => log('LVUSD 状态查询失败:', getErrorMessage(e)));
   }
 
   function getDirectionFilter(signal) {
@@ -2199,6 +2391,7 @@
 
   async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit, slippagePct = getConfiguredSlippagePct() }) {
     assertTradingReady();
+    await assertCollateralReady(margin);
     const pairBase = cfg().symbols[symbol].pairBase;
     const amountIn = parseUnits(String(margin.toFixed(COLLATERAL_DECIMALS)), COLLATERAL_DECIMALS);
     const qty = BigInt(Math.floor(qtyBase * 1e10));
@@ -2412,8 +2605,14 @@
           const closeRes = await sendClosePosition(position.positionHash);
           log('已发送平仓请求:', JSON.stringify(closeRes));
           if (closeRes.input_hash) {
-            const status = await waitExecution(closeRes.input_hash).catch(e => ({ success: false, reason: e.message }));
+            const rawStatus = await waitExecution(closeRes.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
+            const status = normalizeExecutionStatus(rawStatus);
             log('平仓状态:', JSON.stringify(status));
+            if (status.executed && !status.success) {
+              throw new Error(getExecutionFailureReason(status));
+            }
+          } else {
+            throw new Error('keeper 未返回 input_hash，无法确认平仓执行状态');
           }
           state.lastAction = `平仓 ${market}`;
           state.lastTradeTs = Date.now();
@@ -2494,10 +2693,15 @@
           });
           log(`已发送开仓请求: ${entry.symbol} ${entry.filteredSignal}`, JSON.stringify(openRes));
           if (openRes.input_hash) {
-            const status = await waitExecution(openRes.input_hash).catch(e => ({ success: false, reason: e.message }));
+            const rawStatus = await waitExecution(openRes.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
+            const status = normalizeExecutionStatus(rawStatus);
             log(`开仓状态: ${entry.symbol}`, JSON.stringify(status));
+            if (status.executed && !status.success) {
+              throw new Error(getExecutionFailureReason(status));
+            }
           } else {
             log(`开仓请求未返回 input_hash: ${entry.symbol} ${entry.filteredSignal}`);
+            throw new Error('keeper 未返回 input_hash，无法确认开仓执行状态');
           }
           state.lastAction = `开仓 ${entry.symbol} ${entry.filteredSignal}`;
           state.lastTradeTs = Date.now();
@@ -2576,10 +2780,14 @@
     });
     log('手动开仓已发送:', JSON.stringify(res));
     if (res.input_hash) {
-      const status = await waitExecution(res.input_hash).catch(e => ({ success: false, reason: e.message }));
+      const rawStatus = await waitExecution(res.input_hash).catch(e => ({ executed: true, success: false, reason: e.message }));
+      const status = normalizeExecutionStatus(rawStatus);
       log('手动开仓状态:', JSON.stringify(status));
+      if (status.executed && !status.success) {
+        throw new Error(getExecutionFailureReason(status));
+      }
     } else {
-      log(`手动开仓请求未返回 input_hash: ${symbol} ${side}`);
+      throw new Error(`手动开仓请求未返回 input_hash: ${symbol} ${side}`);
     }
     await fetchTrackedPositions();
   }
@@ -2591,10 +2799,14 @@
         const res = await sendClosePosition(closeHash);
         log('手动平仓已发送:', JSON.stringify(res));
         if (res.input_hash) {
-          const status = await waitExecution(res.input_hash).catch(err => ({ success: false, reason: err.message }));
+          const rawStatus = await waitExecution(res.input_hash).catch(err => ({ executed: true, success: false, reason: err.message }));
+          const status = normalizeExecutionStatus(rawStatus);
           log('手动平仓状态:', JSON.stringify(status));
+          if (status.executed && !status.success) {
+            throw new Error(getExecutionFailureReason(status));
+          }
         } else {
-          log(`手动平仓请求未返回 input_hash: ${closeHash}`);
+          throw new Error(`手动平仓请求未返回 input_hash: ${closeHash}`);
         }
         await fetchTrackedPositions();
       } catch (err) {
@@ -2611,6 +2823,8 @@
   });
   els.connectBtn.addEventListener('click', () => connectMetaMask().catch(e => log('连接失败:', getErrorMessage(e))));
   els.regenerateAgentBtn.addEventListener('click', () => { try { regenerateLocalAgent(); } catch (e) { log(e.message || String(e)); } });
+  els.approveCollateralBtn.addEventListener('click', () => approveCollateralToken().catch(e => log('LVUSD 授权失败:', getErrorMessage(e))));
+  els.refreshCollateralBtn.addEventListener('click', () => refreshCollateralApprovalStatus().catch(e => log('刷新 LVUSD 状态失败:', getErrorMessage(e))));
   els.authorizeAgentBtn.addEventListener('click', () => authorizeLocalAgent().catch(e => log('授权失败:', getErrorMessage(e))));
   els.revokeAgentBtn.addEventListener('click', () => revokeLocalAgent().catch(e => log('撤销授权失败:', getErrorMessage(e))));
   els.refreshAuthBtn.addEventListener('click', () => refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e))));
@@ -2636,10 +2850,11 @@
     window.ethereum.on('accountsChanged', (accounts) => {
       const [address] = accounts || [];
       if (!address) {
-        state.traderAddress = '';
-        els.traderAddress.value = '';
-        updatePortfolioEntry();
-        state.agentAuthorized = false;
+      state.traderAddress = '';
+      els.traderAddress.value = '';
+      updatePortfolioEntry();
+      updateCollateralStatusUi({ note: '未连接' });
+      state.agentAuthorized = false;
         state.currentAuthorizedAgent = ZERO_ADDRESS;
         state.authStatusNote = '';
         setBadge(els.mmDot, els.mmStatus, false, '未连接');
@@ -2651,6 +2866,7 @@
       state.traderAddress = address;
       els.traderAddress.value = address;
       updatePortfolioEntry();
+      refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
       setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
       refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
       log('MetaMask 账户已切换:', address);
