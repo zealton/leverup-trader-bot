@@ -892,6 +892,7 @@
           <div><div class="k">最后动作</div><div id="lastAction" class="v" style="font-size:14px">-</div></div>
           <div><div class="k">冷却到</div><div id="cooldownUntil" class="v" style="font-size:14px">-</div></div>
           <div><div class="k">今日已实现 PnL（含费）</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">今日交易量 USD</div><div id="todayVolume" class="v">0</div></div>
           <div><div class="k">当前持仓数</div><div id="openCount" class="v">0</div></div>
         </div>
         <div class="row" style="margin-top:14px;">
@@ -1264,6 +1265,7 @@
     latestBySymbol: {},
     cooldownUntil: 0,
     dayPnl: Number(localStorage.getItem('leverup_dayPnl') || '0'),
+    dayVolumeUsd: Number(localStorage.getItem('leverup_dayVolumeUsd') || '0'),
     lastAction: localStorage.getItem('leverup_lastAction') || '-',
     lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0'),
     pendingOpenBySymbol: {},
@@ -1632,6 +1634,25 @@
     return type === 'CLOSE_TRADE_SUCCESSFUL' || type === 'EXECUTE_CLOSE_SUCCESSFUL';
   }
 
+  function isExecutedVolumeTradeHistory(item) {
+    const type = String(item?.operationType || '');
+    return type === 'OPEN_MARKET_TRADE' || isCloseTradeHistory(item);
+  }
+
+  function getHistoryExecutedVolumeUsd(item) {
+    if (!isExecutedVolumeTradeHistory(item) || !item?.detail) return 0;
+    const qty = Number(formatUnits(toBigIntOrZero(item.qty), 10));
+    let priceRaw = 0n;
+    if (String(item.operationType) === 'OPEN_MARKET_TRADE') {
+      priceRaw = toBigIntOrZero(item.detail.atPrice);
+    } else {
+      priceRaw = toBigIntOrZero(item.detail.closePrice);
+    }
+    const price = Number(formatUnits(priceRaw, 18));
+    if (!Number.isFinite(qty) || !Number.isFinite(price)) return 0;
+    return qty * price;
+  }
+
   function getHistoryPnlAfterFee(item) {
     if (!item?.detail) return 0;
     const detail = item.detail;
@@ -1662,12 +1683,15 @@
   async function refreshDailyRealizedPnl({ silent = false } = {}) {
     if (!state.traderAddress) {
       state.dayPnl = 0;
+      state.dayVolumeUsd = 0;
+      persistState();
       updateStatusPanel();
       return 0;
     }
     try {
       const todayStartMs = getTodayStartMs();
-      let total = 0;
+      let totalPnl = 0;
+      let totalVolumeUsd = 0;
       let page = 0;
       let totalPages = DAILY_PNL_HISTORY_MAX_PAGES;
       let reachedOlderEntries = false;
@@ -1684,15 +1708,20 @@
             reachedOlderEntries = true;
             continue;
           }
-          if (!isCloseTradeHistory(item)) continue;
-          total += getHistoryPnlAfterFee(item);
+          if (isCloseTradeHistory(item)) {
+            totalPnl += getHistoryPnlAfterFee(item);
+          }
+          if (isExecutedVolumeTradeHistory(item)) {
+            totalVolumeUsd += getHistoryExecutedVolumeUsd(item);
+          }
         }
 
         if (!rows.length) break;
         page += 1;
       }
 
-      state.dayPnl = Number.isFinite(total) ? total : 0;
+      state.dayPnl = Number.isFinite(totalPnl) ? totalPnl : 0;
+      state.dayVolumeUsd = Number.isFinite(totalVolumeUsd) ? totalVolumeUsd : 0;
       persistState();
       updateStatusPanel();
       return state.dayPnl;
@@ -1717,6 +1746,16 @@
         : result;
     }
     return {};
+  }
+
+  function formatStatUsd(value) {
+    if (!Number.isFinite(value)) return '-';
+    const abs = Math.abs(value);
+    if (abs >= 1000) {
+      return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value);
+    }
+    if (abs >= 100) return value.toFixed(1);
+    return value.toFixed(2);
   }
 
   function classifyLogTone(message) {
@@ -1764,6 +1803,7 @@
 
   function persistState() {
     localStorage.setItem('leverup_dayPnl', String(state.dayPnl));
+    localStorage.setItem('leverup_dayVolumeUsd', String(state.dayVolumeUsd));
     localStorage.setItem('leverup_lastAction', state.lastAction);
     localStorage.setItem('leverup_lastTradeTs', String(state.lastTradeTs));
   }
@@ -3129,7 +3169,8 @@
   function updateStatusPanel() {
     els.lastAction.textContent = state.lastAction;
     els.cooldownUntil.textContent = state.cooldownUntil ? new Date(state.cooldownUntil).toLocaleString('zh-CN', { hour12: false }) : '-';
-    els.todayPnl.textContent = String(state.dayPnl.toFixed(2));
+    els.todayPnl.textContent = formatStatUsd(state.dayPnl);
+    if (els.todayVolume) els.todayVolume.textContent = formatStatUsd(state.dayVolumeUsd);
     updatePortfolioEntry();
   }
 
@@ -3279,6 +3320,8 @@
       if (!address) {
         state.traderAddress = '';
         state.dayPnl = 0;
+        state.dayVolumeUsd = 0;
+        persistState();
         els.traderAddress.value = '';
         updatePortfolioEntry();
         updateCollateralStatusUi({ note: '未连接' });
@@ -3295,6 +3338,8 @@
       }
       state.traderAddress = address;
       state.dayPnl = 0;
+      state.dayVolumeUsd = 0;
+      persistState();
       els.traderAddress.value = address;
       updatePortfolioEntry();
       hydratePendingOpenState();
