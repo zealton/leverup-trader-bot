@@ -3124,7 +3124,7 @@
         <td>${p.market || resolveSymbolFromPairBase(p.pairBase)}</td>
         <td class="mono">${p.positionHash.slice(0, 10)}...</td>
         <td>${p.isLong ? 'LONG' : 'SHORT'}</td>
-        <td>${Number(formatUnits(p.margin, 6)).toFixed(2)}</td>
+        <td>${getPositionMarginUsd(p).toFixed(2)}</td>
         <td>${Number(formatUnits(p.qty, 10)).toFixed(5)}</td>
         <td>${formatPrice(Number(formatUnits(p.entryPrice, 18)))}</td>
         <td><button class="danger" data-close="${p.positionHash}">平仓</button></td>
