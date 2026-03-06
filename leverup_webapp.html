@@ -1008,7 +1008,10 @@
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           当前默认风控也偏向“少跳过、多出手”：单笔风险默认 3.0%，止损默认 1.2 ATR，自动计划器允许在预算附近做适度超配。
           已有仓位现在会启用 Bot 侧动态止损：浮盈到 0.75R 自动提到保本，浮盈到 1.0R 后改为 0.8 ATR 追踪止损。
+          策略现在每轮最多只会新开 1 单；同一市场如果刚被止损，会先冷却 45 分钟再允许同方向重开，且当天同市场累计止损 2 次后会暂停继续开新仓。
+          新开仓还会加一层波动过滤：15m ATR 过大、4h 趋势差过弱、或价格离 15m EMA20 过远时，Bot 会主动跳过边缘信号。
           自动杠杆不会固定写死；Bot 会按 15m 波动和 4h 趋势强弱，在 10x 到你设定上限之间动态挑选实际杠杆。
+          自动选仓位时，也不再只追求最低可开门槛；在风险预算允许下，会优先挑更接近目标保证金的方案，避免大多数单子都贴着 10U 开。
           开仓如果因为可接受成交价过严被拒，会自动逐步上调滑点，最高尝试到 5%。
         </div>
 
@@ -1158,6 +1161,17 @@
   const DYNAMIC_STOP_BREAK_EVEN_TRIGGER_R = 0.75;
   const DYNAMIC_STOP_TRAILING_TRIGGER_R = 1;
   const DYNAMIC_STOP_TRAILING_ATR = 0.8;
+  const MAX_NEW_POSITIONS_PER_CYCLE = 1;
+  const REENTRY_AFTER_STOP_LOSS_MINS = 45;
+  const MARKET_DAILY_STOP_LOSS_LIMIT = 2;
+  const HISTORY_RESTRICTION_CACHE_MS = 30 * 1000;
+  const HISTORY_RESTRICTION_PAGE_SIZE = 100;
+  const HISTORY_RESTRICTION_MAX_PAGES = 2;
+  const VOL_FILTER_MIN_TREND_GAP_PCT = 0.008;
+  const VOL_FILTER_MAX_ATR_PCT = 0.012;
+  const VOL_FILTER_MAX_EMA_STRETCH_PCT = 0.008;
+  const AUTO_MARGIN_TARGET_UTILIZATION = 0.4;
+  const AUTO_MARGIN_TARGET_MIN_USD = 18;
   const EXECUTION_FEE_USD = 0;
   const OPEN_FEE_RATE = 7 / 10000;
   const MIN_NOTIONAL_CHECK_BUFFER = 0.005;
@@ -1289,6 +1303,8 @@
     lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0'),
     pendingOpenBySymbol: {},
     dynamicStopByPosition: {},
+    marketStopStateBySymbol: {},
+    historyTradeRestrictions: { updatedAt: 0, bySymbol: {} },
     strategyInFlight: false
   };
 
@@ -1388,6 +1404,34 @@
     return `leverup_dynamic_stop_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
   }
 
+  function getMarketStopStorageKey() {
+    if (!state.traderAddress) return '';
+    return `leverup_market_stop_${cfg().chainId}_${state.traderAddress.toLowerCase()}`;
+  }
+
+  function getLocalDayKey() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function normalizeMarketStopState(rawState = {}) {
+    const dayKey = getLocalDayKey();
+    const next = {};
+    for (const [symbol, value] of Object.entries(rawState || {})) {
+      if (!value || typeof value !== 'object') continue;
+      next[symbol] = {
+        dayKey,
+        dayStopLossCount: value.dayKey === dayKey ? Number(value.dayStopLossCount || 0) : 0,
+        lastStopLossAt: value.dayKey === dayKey ? Number(value.lastStopLossAt || 0) : 0,
+        lastStopLossSide: value.dayKey === dayKey ? String(value.lastStopLossSide || '') : ''
+      };
+    }
+    return next;
+  }
+
   function persistPendingOpenState() {
     const key = getPendingOpenStorageKey();
     if (!key) return;
@@ -1435,6 +1479,174 @@
     } catch {
       state.dynamicStopByPosition = {};
     }
+  }
+
+  function persistMarketStopState() {
+    const key = getMarketStopStorageKey();
+    if (!key) return;
+    const normalized = normalizeMarketStopState(state.marketStopStateBySymbol);
+    const entries = Object.entries(normalized).filter(([, value]) =>
+      Number(value.dayStopLossCount || 0) > 0 || Number(value.lastStopLossAt || 0) > 0
+    );
+    if (!entries.length) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  }
+
+  function hydrateMarketStopState() {
+    const key = getMarketStopStorageKey();
+    if (!key) {
+      state.marketStopStateBySymbol = {};
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(key);
+      state.marketStopStateBySymbol = normalizeMarketStopState(raw ? JSON.parse(raw) : {});
+    } catch {
+      state.marketStopStateBySymbol = {};
+    }
+  }
+
+  function getLocalMarketStopEntry(symbol) {
+    const normalized = normalizeMarketStopState(state.marketStopStateBySymbol);
+    state.marketStopStateBySymbol = normalized;
+    return normalized[symbol] || {
+      dayKey: getLocalDayKey(),
+      dayStopLossCount: 0,
+      lastStopLossAt: 0,
+      lastStopLossSide: ''
+    };
+  }
+
+  function recordLocalMarketStopLoss(symbol, side) {
+    const current = getLocalMarketStopEntry(symbol);
+    state.marketStopStateBySymbol[symbol] = {
+      dayKey: getLocalDayKey(),
+      dayStopLossCount: Number(current.dayStopLossCount || 0) + 1,
+      lastStopLossAt: Date.now(),
+      lastStopLossSide: side
+    };
+    persistMarketStopState();
+  }
+
+  function clearLocalMarketStopLoss(symbol) {
+    const current = getLocalMarketStopEntry(symbol);
+    if (!current.dayStopLossCount && !current.lastStopLossAt) return;
+    state.marketStopStateBySymbol[symbol] = {
+      dayKey: getLocalDayKey(),
+      dayStopLossCount: 0,
+      lastStopLossAt: 0,
+      lastStopLossSide: ''
+    };
+    persistMarketStopState();
+  }
+
+  function normalizeHistorySymbolLabel(value) {
+    if (!value) return '';
+    const normalized = String(value).trim().toUpperCase();
+    if (!normalized) return '';
+    const cleaned = normalized
+      .replace(/^CRYPTO\./, '')
+      .replace(/^MONAD\./, '')
+      .replace(/[-_]/g, '/');
+    const direct = getTrackedSymbols().find(symbol => cleaned === symbol);
+    if (direct) return direct;
+    const slashMatch = cleaned.match(/^([A-Z0-9]+)\//);
+    if (slashMatch && cfg().symbols[slashMatch[1]]) return slashMatch[1];
+    const suffixMatch = cleaned.match(/^([A-Z0-9]+)(USD|USDT)$/);
+    if (suffixMatch && cfg().symbols[suffixMatch[1]]) return suffixMatch[1];
+    const embedded = getTrackedSymbols().find(symbol => cleaned.includes(symbol));
+    return embedded || '';
+  }
+
+  function resolveHistorySymbol(item) {
+    const pairBase = item?.pairBase || item?.detail?.pairBase || item?.detail?.pair_address;
+    if (pairBase) {
+      const byPairBase = resolveSymbolFromPairBase(pairBase);
+      if (byPairBase !== '-') return byPairBase;
+    }
+    const candidates = [
+      item?.symbol,
+      item?.market,
+      item?.pair,
+      item?.ticker,
+      item?.detail?.symbol,
+      item?.detail?.market,
+      item?.detail?.pair,
+      item?.detail?.ticker
+    ];
+    for (const candidate of candidates) {
+      const resolved = normalizeHistorySymbolLabel(candidate);
+      if (resolved) return resolved;
+    }
+    return '';
+  }
+
+  function normalizeHistorySide(value) {
+    if (value === true) return 'LONG';
+    if (value === false) return 'SHORT';
+    const normalized = String(value || '').trim().toUpperCase();
+    if (!normalized) return '';
+    if (normalized === 'TRUE') return 'LONG';
+    if (normalized === 'FALSE') return 'SHORT';
+    if (normalized.includes('LONG') || normalized === 'BUY') return 'LONG';
+    if (normalized.includes('SHORT') || normalized === 'SELL') return 'SHORT';
+    return '';
+  }
+
+  function resolveHistorySide(item) {
+    return (
+      normalizeHistorySide(item?.isLong) ||
+      normalizeHistorySide(item?.detail?.isLong) ||
+      normalizeHistorySide(item?.side) ||
+      normalizeHistorySide(item?.detail?.side) ||
+      normalizeHistorySide(item?.positionSide) ||
+      normalizeHistorySide(item?.detail?.positionSide)
+    );
+  }
+
+  function createEmptyHistoryRestrictionEntry() {
+    return {
+      dayStopLossCount: 0,
+      lastStopLossBySide: { LONG: 0, SHORT: 0 }
+    };
+  }
+
+  function isStopLikeCloseReason(reason) {
+    return /止损/.test(String(reason || ''));
+  }
+
+  function getHistoryRestrictionEntry(symbol) {
+    return state.historyTradeRestrictions?.bySymbol?.[symbol] || createEmptyHistoryRestrictionEntry();
+  }
+
+  function getCombinedMarketRestriction(symbol, side) {
+    const historyEntry = getHistoryRestrictionEntry(symbol);
+    const localEntry = getLocalMarketStopEntry(symbol);
+    const dayStopLossCount =
+      Number(historyEntry.dayStopLossCount || 0) +
+      Number(localEntry.dayStopLossCount || 0);
+    const sideStopLossAt = Math.max(
+      Number(historyEntry.lastStopLossBySide?.[side] || 0),
+      localEntry.lastStopLossSide === side ? Number(localEntry.lastStopLossAt || 0) : 0
+    );
+    if (dayStopLossCount >= MARKET_DAILY_STOP_LOSS_LIMIT) {
+      return {
+        blocked: true,
+        reason: `今日 ${symbol} 已止损 ${dayStopLossCount} 次，暂停新开仓`
+      };
+    }
+    const resumeAt = sideStopLossAt + REENTRY_AFTER_STOP_LOSS_MINS * 60 * 1000;
+    if (sideStopLossAt && resumeAt > Date.now()) {
+      const remainMins = Math.ceil((resumeAt - Date.now()) / 60000);
+      return {
+        blocked: true,
+        reason: `${symbol} ${side} 刚止损，剩余 ${remainMins} 分钟后才允许同方向再入场`
+      };
+    }
+    return { blocked: false, reason: '' };
   }
 
   function pruneDynamicStops(activePositionHashes = []) {
@@ -1749,6 +1961,11 @@
     return type === 'CLOSE_TRADE_SUCCESSFUL' || type === 'EXECUTE_CLOSE_SUCCESSFUL';
   }
 
+  function isHistoryStopLossClose(item) {
+    if (!isCloseTradeHistory(item) || !item?.detail) return false;
+    return String(item.detail.executionType || '').toUpperCase() === 'SL';
+  }
+
   function isExecutedVolumeTradeHistory(item) {
     const type = String(item?.operationType || '');
     return type === 'OPEN_MARKET_TRADE' || isCloseTradeHistory(item);
@@ -1824,6 +2041,57 @@
     const url = getTradeHistoryApiUrl(page, size);
     const res = await fetch(url);
     return parseApiResponse(res, '获取交易历史失败');
+  }
+
+  async function refreshHistoryTradeRestrictions({ force = false } = {}) {
+    if (!state.traderAddress) {
+      state.historyTradeRestrictions = { updatedAt: 0, bySymbol: {} };
+      return state.historyTradeRestrictions;
+    }
+    const now = Date.now();
+    if (!force && now - Number(state.historyTradeRestrictions?.updatedAt || 0) < HISTORY_RESTRICTION_CACHE_MS) {
+      return state.historyTradeRestrictions;
+    }
+
+    const todayStartMs = getTodayStartMs();
+    const bySymbol = {};
+    let page = 0;
+    let totalPages = HISTORY_RESTRICTION_MAX_PAGES;
+    let reachedOlderEntries = false;
+
+    while (page < Math.min(totalPages, HISTORY_RESTRICTION_MAX_PAGES) && !reachedOlderEntries) {
+      const response = await fetchTradeHistoryPage(page, HISTORY_RESTRICTION_PAGE_SIZE);
+      const rows = Array.isArray(response?.content) ? response.content : [];
+      totalPages = Number.isFinite(response?.totalPages) ? response.totalPages : totalPages;
+
+      for (const item of rows) {
+        const blockTimeMs = Date.parse(item?.blockTime || '');
+        if (!Number.isFinite(blockTimeMs)) continue;
+        if (blockTimeMs < todayStartMs) {
+          reachedOlderEntries = true;
+          continue;
+        }
+        if (!isHistoryStopLossClose(item)) continue;
+        const symbol = resolveHistorySymbol(item);
+        if (!symbol) continue;
+        const side = resolveHistorySide(item);
+        const entry = bySymbol[symbol] || createEmptyHistoryRestrictionEntry();
+        entry.dayStopLossCount += 1;
+        if (side === 'LONG' || side === 'SHORT') {
+          entry.lastStopLossBySide[side] = Math.max(entry.lastStopLossBySide[side] || 0, blockTimeMs);
+        }
+        bySymbol[symbol] = entry;
+      }
+
+      if (!rows.length) break;
+      page += 1;
+    }
+
+    state.historyTradeRestrictions = {
+      updatedAt: now,
+      bySymbol
+    };
+    return state.historyTradeRestrictions;
   }
 
   async function refreshDailyRealizedPnl({ silent = false } = {}) {
@@ -1978,11 +2246,14 @@
     if (state.traderAddress) {
       hydratePendingOpenState();
       hydrateDynamicStopState();
+      hydrateMarketStopState();
       refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e)));
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('刷新 LVUSD 状态失败:', getErrorMessage(e)));
     } else {
       state.pendingOpenBySymbol = {};
       state.dynamicStopByPosition = {};
+      state.marketStopStateBySymbol = {};
+      state.historyTradeRestrictions = { updatedAt: 0, bySymbol: {} };
       updateCollateralStatusUi({ note: '未连接' });
     }
   }
@@ -2234,6 +2505,7 @@
     hydrateKnownAuthorizationFromCache();
     hydratePendingOpenState();
     hydrateDynamicStopState();
+    hydrateMarketStopState();
     setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
     log('已连接 MetaMask:', address);
     refreshAgentAuthorizationStatus().catch(e => log('授权状态查询失败，不影响继续授权:', getErrorMessage(e)));
@@ -2583,6 +2855,30 @@
     return `当前观望。偏多未确认：${longSummary}；偏空未确认：${shortSummary}`;
   }
 
+  function evaluateVolatilityFilter(entry) {
+    const sig = entry?.sig;
+    const atrPct = sig?.price > 0 ? sig.atr / sig.price : 0;
+    const trendGapPct = Number(sig?.diag?.trendGapPct || 0);
+    const emaStretchPct = Number(sig?.diag?.emaStretchPct || 0);
+    const reasons = [];
+    if (atrPct > VOL_FILTER_MAX_ATR_PCT) {
+      reasons.push(`15m ATR 偏大 ${(atrPct * 100).toFixed(2)}% > ${(VOL_FILTER_MAX_ATR_PCT * 100).toFixed(2)}%`);
+    }
+    if (trendGapPct < VOL_FILTER_MIN_TREND_GAP_PCT) {
+      reasons.push(`4h 趋势差过弱 ${(trendGapPct * 100).toFixed(2)}% < ${(VOL_FILTER_MIN_TREND_GAP_PCT * 100).toFixed(2)}%`);
+    }
+    if (emaStretchPct > VOL_FILTER_MAX_EMA_STRETCH_PCT) {
+      reasons.push(`价格离 15m EMA20 过远 ${(emaStretchPct * 100).toFixed(2)}% > ${(VOL_FILTER_MAX_EMA_STRETCH_PCT * 100).toFixed(2)}%`);
+    }
+    return {
+      ok: reasons.length === 0,
+      reasons,
+      atrPct,
+      trendGapPct,
+      emaStretchPct
+    };
+  }
+
   function renderSignalDiagnostics(sig, filteredSignal, symbol = getFocusSymbol()) {
     if (!els.signalDiag) return;
     if (!sig?.diag) {
@@ -2590,6 +2886,7 @@
       return;
     }
     const d = sig.diag;
+    const volatilityFilter = evaluateVolatilityFilter({ sig });
     const modeMap = { both: '双向', long: '只做多', short: '只做空' };
     const entryModeMap = { aggressive: '激进', conservative: '稳健' };
     const lines = [
@@ -2618,6 +2915,12 @@
       `- 15m 跌破前低: ${d.shortBreakdown ? '通过' : '未通过'} (close ${formatPrice(d.last15Close)} / prevLow ${formatPrice(d.prev15Low)})`,
       `- 15m 失守 EMA20: ${d.shortReclaim ? '通过' : '未通过'}`,
       `- 15m 续跌动能: ${d.shortMomentumBar ? '通过' : '未通过'}`,
+      '',
+      `波动过滤: ${volatilityFilter.ok ? '通过' : '未通过'}`,
+      `- ATR(15m)/价格 = ${(volatilityFilter.atrPct * 100).toFixed(2)}%`,
+      `- 4h 趋势差 = ${(volatilityFilter.trendGapPct * 100).toFixed(2)}%`,
+      `- 价格偏离 EMA20 = ${(volatilityFilter.emaStretchPct * 100).toFixed(2)}%`,
+      ...(volatilityFilter.ok ? [] : [`- 过滤原因: ${volatilityFilter.reasons.join('；')}`]),
       '',
       `结论: ${summarizeSignalDecision(sig, filteredSignal)}`
     ];
@@ -2882,9 +3185,17 @@
     });
   }
 
+  function getAutoMarginTargetUsd(riskInputs) {
+    return Math.min(
+      riskInputs.maxMargin,
+      Math.max(AUTO_MARGIN_TARGET_MIN_USD, riskInputs.maxMargin * AUTO_MARGIN_TARGET_UTILIZATION)
+    );
+  }
+
   function selectAutoTradePlan(side, sig, riskInputs) {
     const targetDecision = pickAutoLeverage(side, sig, riskInputs.leverageCap);
     const riskBudgetUsd = Math.max(0, riskInputs.maxMargin * (riskInputs.riskPct / 100));
+    const targetMarginUsd = getAutoMarginTargetUsd(riskInputs);
     const budgetCeilingUsd = Math.max(
       AUTO_RISK_BUDGET_TOLERANCE_ABS_USD,
       riskBudgetUsd + AUTO_RISK_BUDGET_TOLERANCE_ABS_USD,
@@ -2910,14 +3221,24 @@
 
     const budgetFriendly = candidates.filter(({ plan }) => plan.effectiveRiskUsd <= budgetCeilingUsd);
     if (budgetFriendly.length) {
-      const selected = budgetFriendly[0];
+      const selected = [...budgetFriendly].sort((a, b) => {
+        const aMarginGap = Math.abs(a.plan.margin - targetMarginUsd);
+        const bMarginGap = Math.abs(b.plan.margin - targetMarginUsd);
+        if (aMarginGap !== bMarginGap) return aMarginGap - bMarginGap;
+        if (a.plan.margin !== b.plan.margin) return b.plan.margin - a.plan.margin;
+        const aLevGap = Math.abs(a.decisionForLeverage.leverage - targetDecision.leverage);
+        const bLevGap = Math.abs(b.decisionForLeverage.leverage - targetDecision.leverage);
+        if (aLevGap !== bLevGap) return aLevGap - bLevGap;
+        return a.decisionForLeverage.leverage - b.decisionForLeverage.leverage;
+      })[0];
       return {
         ok: true,
         plan: selected.plan,
         targetDecision,
         selectedDecision: selected.decisionForLeverage,
         riskBudgetUsd,
-        budgetCeilingUsd
+        budgetCeilingUsd,
+        targetMarginUsd
       };
     }
 
@@ -2932,7 +3253,8 @@
       selectedDecision: smallestRisk?.decisionForLeverage || targetDecision,
       smallestRiskPlan: smallestRisk?.plan || null,
       riskBudgetUsd,
-      budgetCeilingUsd
+      budgetCeilingUsd,
+      targetMarginUsd
     };
   }
 
@@ -3352,6 +3674,11 @@
         if (!positionsBySymbol.has(market)) positionsBySymbol.set(market, []);
         positionsBySymbol.get(market).push(position);
       }
+      try {
+        await refreshHistoryTradeRestrictions();
+      } catch (historyError) {
+        log('刷新止损限制失败，不影响本轮继续:', getErrorMessage(historyError));
+      }
 
       const scanSummary = marketEntries
         .sort((a, b) => b.score - a.score)
@@ -3392,6 +3719,9 @@
           } else {
             throw new Error('keeper 未返回 input_hash，无法确认平仓执行状态');
           }
+          if (isStopLikeCloseReason(closeDecision.reason)) {
+            recordLocalMarketStopLoss(market, position.isLong ? 'LONG' : 'SHORT');
+          }
           delete state.dynamicStopByPosition[String(position.positionHash)];
           persistDynamicStopState();
           state.lastAction = `平仓 ${market}`;
@@ -3430,10 +3760,33 @@
         );
       }
 
-      const openCandidates = marketEntries
+      const openSkipReasonBySymbol = {};
+      const openBaseCandidates = marketEntries
         .filter(entry => entry.filteredSignal !== 'FLAT')
         .filter(entry => !(positionsBySymbol.get(entry.symbol)?.length))
-        .filter(entry => !state.pendingOpenBySymbol[entry.symbol])
+        .filter(entry => !state.pendingOpenBySymbol[entry.symbol]);
+
+      const restrictionCandidates = [];
+      for (const entry of openBaseCandidates) {
+        const restriction = getCombinedMarketRestriction(entry.symbol, entry.filteredSignal);
+        if (restriction.blocked) {
+          openSkipReasonBySymbol[entry.symbol] = restriction.reason;
+          log(`${entry.symbol} ${entry.filteredSignal} 跳过: ${restriction.reason}`);
+          continue;
+        }
+        restrictionCandidates.push(entry);
+      }
+
+      const openCandidates = restrictionCandidates
+        .filter(entry => {
+          const volatilityFilter = evaluateVolatilityFilter(entry);
+          entry.volatilityFilter = volatilityFilter;
+          if (volatilityFilter.ok) return true;
+          const reason = `波动过滤未通过：${volatilityFilter.reasons.join('；')}`;
+          openSkipReasonBySymbol[entry.symbol] = reason;
+          log(`${entry.symbol} ${entry.filteredSignal} 跳过: ${reason}`);
+          return false;
+        })
         .sort((a, b) => b.score - a.score);
 
       if (!openCandidates.length) {
@@ -3444,6 +3797,8 @@
           log(`${trigger} 未开仓: ${focusSymbol} ${focusEntry.filteredSignal}，已有仓位 ${summarizeExistingPositions(focusPositions)}`);
         } else if (focusEntry?.filteredSignal !== 'FLAT' && state.pendingOpenBySymbol[focusSymbol]) {
           log(`${trigger} 未开仓: ${focusSymbol} ${focusEntry.filteredSignal}，已有待确认开仓 ${getPendingOpenLabel(focusSymbol)}`);
+        } else if (focusEntry?.filteredSignal !== 'FLAT' && openSkipReasonBySymbol[focusSymbol]) {
+          log(`${trigger} 未开仓: ${focusSymbol} ${focusEntry.filteredSignal}，${openSkipReasonBySymbol[focusSymbol]}`);
         } else {
           log(`${trigger} 无新信号: ${focusEntry ? summarizeSignalDecision(focusEntry.sig, focusEntry.filteredSignal) : '暂无聚焦标的诊断'}`);
         }
@@ -3451,6 +3806,7 @@
       }
 
       let openedAny = false;
+      let openedCount = 0;
       for (const entry of openCandidates) {
         const symbolRiskInputs = {
           ...r,
@@ -3467,7 +3823,7 @@
         const leveragePrefix = selection.ok && leverageDecision.leverage !== targetLeverage
           ? `动态杠杆调整: ${entry.symbol} ${targetLeverage.toFixed(0)}x -> ${leverageDecision.leverage.toFixed(0)}x`
           : `动态杠杆选择: ${entry.symbol} ${leverageDecision.leverage.toFixed(0)}x`;
-        log(`${leveragePrefix} / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
+        log(`${leveragePrefix} / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%${selection.ok ? ` / margin ${selection.plan.margin.toFixed(2)}U(target ${selection.targetMarginUsd.toFixed(2)}U)` : ''}`);
 
         if (!selection.ok) {
           if (selection.reason === 'risk_budget_too_small' && selection.smallestRiskPlan) {
@@ -3530,6 +3886,11 @@
           state.lastAction = `开仓 ${entry.symbol} ${entry.filteredSignal}`;
           state.lastTradeTs = Date.now();
           openedAny = true;
+          openedCount += 1;
+          if (openedCount >= MAX_NEW_POSITIONS_PER_CYCLE) {
+            log(`本轮已开 ${openedCount} 单，停止继续开新仓`);
+            break;
+          }
         } catch (openError) {
           clearPendingOpen(entry.symbol);
           log(`${entry.symbol} 开仓失败:`, getErrorMessage(openError));
@@ -3853,6 +4214,8 @@
         updateCollateralStatusUi({ note: '未连接' });
         state.pendingOpenBySymbol = {};
         state.dynamicStopByPosition = {};
+        state.marketStopStateBySymbol = {};
+        state.historyTradeRestrictions = { updatedAt: 0, bySymbol: {} };
         state.agentAuthorized = false;
         state.currentAuthorizedAgent = ZERO_ADDRESS;
         state.authStatusNote = '';
@@ -3873,6 +4236,7 @@
       updatePortfolioEntry();
       hydratePendingOpenState();
       hydrateDynamicStopState();
+      hydrateMarketStopState();
       refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
       setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
       refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
