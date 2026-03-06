@@ -1296,6 +1296,53 @@
     return CONFIG[els.network.value];
   }
 
+  function isLocalBrowserOrigin() {
+    if (typeof window === 'undefined') return false;
+    const host = window.location.hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+  }
+
+  function shouldUseServerProxy() {
+    if (typeof window === 'undefined') return false;
+    if (!/^https?:$/.test(window.location.protocol)) return false;
+    return !isLocalBrowserOrigin();
+  }
+
+  function getProxyNetworkName() {
+    return els.network.value === 'testnet' ? 'testnet' : 'mainnet';
+  }
+
+  function getTradeHistoryApiUrl(page, size) {
+    const params = new URLSearchParams({
+      page: String(page),
+      size: String(size),
+      block_chain: 'MONAD'
+    });
+    if (shouldUseServerProxy()) {
+      params.set('address', state.traderAddress);
+      params.set('network', getProxyNetworkName());
+      return `/api/backend/trade-history?${params.toString()}`;
+    }
+    return `${cfg().backendUrl}/v1/user/${encodeURIComponent(state.traderAddress)}/trade/history?${params.toString()}`;
+  }
+
+  function getOneClickApiUrl(action, extra = {}) {
+    const params = new URLSearchParams({
+      blockchain: 'MONAD'
+    });
+    if (shouldUseServerProxy()) {
+      params.set('network', getProxyNetworkName());
+      for (const [key, value] of Object.entries(extra)) {
+        if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+      }
+      return `/api/oneclick/${action}?${params.toString()}`;
+    }
+    if (action === 'status') {
+      return `${cfg().keeperUrl}/v1/trading/${encodeURIComponent(String(extra.inputHash || ''))}/status`;
+    }
+    return `${cfg().keeperUrl}/v1/trading/${action}?${params.toString()}`;
+  }
+
   function getTrackedSymbols() {
     return Object.keys(cfg().symbols);
   }
@@ -1774,12 +1821,7 @@
 
   async function fetchTradeHistoryPage(page = 0, size = DAILY_PNL_HISTORY_PAGE_SIZE) {
     if (!state.traderAddress) throw new Error('未连接 MetaMask，无法获取交易历史');
-    const params = new URLSearchParams({
-      page: String(page),
-      size: String(size),
-      block_chain: 'MONAD'
-    });
-    const url = `${cfg().backendUrl}/v1/user/${encodeURIComponent(state.traderAddress)}/trade/history?${params.toString()}`;
+    const url = getTradeHistoryApiUrl(page, size);
     const res = await fetch(url);
     return parseApiResponse(res, '获取交易历史失败');
   }
@@ -2985,7 +3027,7 @@
       log(`${symbol} 命中 ${symbolMaxLeverage}x 最大杠杆档，按官方 0.5% safety buffer 下调开仓数量`);
     }
     log(`准备发送开仓: side=${side} lev=${Number.isFinite(leverage) ? leverage.toFixed(0) : '-'}x ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${slippagePct.toFixed(1)}%`);
-    const url = `${cfg().keeperUrl}/v1/trading/send-open-position?blockchain=MONAD`;
+    const url = getOneClickApiUrl('send-open-position');
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3015,7 +3057,7 @@
     assertTradingReady();
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     const signature = await signClosePosition({ positionHash, deadline });
-    const url = `${cfg().keeperUrl}/v1/trading/send-close-position?blockchain=MONAD`;
+    const url = getOneClickApiUrl('send-close-position');
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3027,7 +3069,7 @@
   async function waitExecution(inputHash, timeoutMs = 90000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
-      const res = await fetch(`${cfg().keeperUrl}/v1/trading/${inputHash}/status`);
+      const res = await fetch(getOneClickApiUrl('status', { inputHash }));
       const json = await res.json();
       if (json.executed) return json;
       await new Promise(r => setTimeout(r, 3000));
