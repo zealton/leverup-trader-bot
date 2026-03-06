@@ -675,8 +675,8 @@
             <input id="maxMargin" type="number" min="10" step="0.1" value="50" />
           </div>
           <div>
-            <label>默认杠杆</label>
-            <input id="leverage" type="number" min="1" max="100" step="0.1" value="20" />
+            <label>自动杠杆上限</label>
+            <input id="leverage" type="number" min="10" max="100" step="1" value="100" />
           </div>
           <div>
             <label>单笔风险 %</label>
@@ -752,6 +752,7 @@
           BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
+          自动杠杆不会固定写死；Bot 会按 15m 波动和 4h 趋势强弱，在 10x 到你设定上限之间动态挑选实际杠杆。
           开仓如果因为可接受成交价过严被拒，会自动逐步上调滑点，最高尝试到 5%。
         </div>
 
@@ -760,6 +761,7 @@
           <div><div class="k">4h 趋势</div><div id="signal4h" class="v">-</div></div>
           <div><div class="k">参考价格</div><div id="lastPrice" class="v">-</div></div>
           <div><div class="k">ATR(15m)</div><div id="lastAtr" class="v">-</div></div>
+          <div><div class="k">自动杠杆</div><div id="autoLeverage" class="v">-</div></div>
         </div>
 
         <div class="row" style="margin-top:14px;">
@@ -1596,7 +1598,7 @@
   function getRiskInputs() {
     return {
       maxMargin: Number(els.maxMargin.value),
-      leverage: clampLeverage(Number(els.leverage.value)),
+      leverageCap: Math.max(10, clampLeverage(Number(els.leverage.value))),
       riskPct: Number(els.riskPct.value),
       slippagePct: Number(els.slippagePct.value),
       slAtr: Number(els.slAtr.value),
@@ -1614,6 +1616,58 @@
     const stopLoss = side === 'LONG' ? price - stopDistance : price + stopDistance;
     const takeProfit = side === 'LONG' ? price + stopDistance * r.tpRr : price - stopDistance * r.tpRr;
     return { stopDistance, stopLoss, takeProfit };
+  }
+
+  function roundLeverageStep(value) {
+    return Math.round(value / 5) * 5;
+  }
+
+  function pickAutoLeverage(side, sig, leverageCap = getRiskInputs().leverageCap) {
+    const cappedMax = Math.max(10, Math.min(MAX_SYMBOL_LEVERAGE, leverageCap));
+    const atrPct = sig?.price > 0 ? sig.atr / sig.price : 0;
+    const diag = sig?.diag || {};
+    const trendGapPct = sig?.price > 0
+      ? Math.abs((diag.lastEma50_4h || 0) - (diag.lastEma200_4h || 0)) / sig.price
+      : 0;
+    const emaStretchPct = sig?.price > 0
+      ? Math.abs(sig.price - (diag.lastEma20 || sig.price)) / sig.price
+      : 0;
+
+    let leverage;
+    if (atrPct >= 0.03) leverage = 10;
+    else if (atrPct >= 0.02) leverage = 15;
+    else if (atrPct >= 0.015) leverage = 20;
+    else if (atrPct >= 0.012) leverage = 25;
+    else if (atrPct >= 0.009) leverage = 35;
+    else if (atrPct >= 0.007) leverage = 45;
+    else if (atrPct >= 0.005) leverage = 60;
+    else if (atrPct >= 0.0035) leverage = 75;
+    else leverage = 90;
+
+    if (trendGapPct >= 0.03) leverage += 10;
+    else if (trendGapPct >= 0.015) leverage += 5;
+    else if (trendGapPct <= 0.006) leverage -= 10;
+
+    if (emaStretchPct >= 0.01) leverage -= 10;
+    else if (emaStretchPct <= 0.003) leverage += 5;
+
+    if (side === 'LONG') {
+      if (diag.longBreakout) leverage += 5;
+      if (diag.longTouchEma && !diag.longBreakout && !diag.longReclaim) leverage -= 5;
+    } else if (side === 'SHORT') {
+      if (diag.shortBreakdown) leverage += 5;
+      if (diag.shortTouchEma && !diag.shortBreakdown && !diag.shortReclaim) leverage -= 5;
+    }
+
+    leverage = Math.max(10, Math.min(cappedMax, roundLeverageStep(leverage)));
+
+    return {
+      leverage,
+      leverageCap: cappedMax,
+      atrPct,
+      trendGapPct,
+      emaStretchPct
+    };
   }
 
   function clampSlippagePct(value) {
@@ -1662,9 +1716,9 @@
     };
   }
 
-  function buildAutoTradePlan(side, price, atrValue) {
+  function buildAutoTradePlan(side, price, atrValue, sig, leverageDecision = pickAutoLeverage(side, sig)) {
     const r = getRiskInputs();
-    const leverage = clampLeverage(r.leverage);
+    const leverage = leverageDecision.leverage;
     const riskBudgetUsd = Math.max(0, r.maxMargin * (r.riskPct / 100));
     const { stopDistance, stopLoss, takeProfit } = buildStops(side, price, atrValue);
     if (!Number.isFinite(stopDistance) || stopDistance <= 0) {
@@ -1704,7 +1758,11 @@
       riskBudgetUsd,
       effectiveRiskUsd,
       minRequiredNotionalUsd,
-      floorApplied: qtyByRisk < minQtyByNotional
+      floorApplied: qtyByRisk < minQtyByNotional,
+      leverageCap: leverageDecision.leverageCap,
+      atrPct: leverageDecision.atrPct,
+      trendGapPct: leverageDecision.trendGapPct,
+      emaStretchPct: leverageDecision.emaStretchPct
     };
   }
 
@@ -1886,6 +1944,7 @@
       els.signal4h.textContent = sig.trend;
       els.lastPrice.textContent = formatPrice(sig.price);
       els.lastAtr.textContent = formatPrice(sig.atr);
+      els.autoLeverage.textContent = '-';
 
       const positions = await fetchPositions();
       const filteredSignal = getDirectionFilter(sig.signal);
@@ -1931,7 +1990,11 @@
         return;
       }
 
-      const plan = buildAutoTradePlan(filteredSignal, sig.price, sig.atr);
+      const leverageDecision = pickAutoLeverage(filteredSignal, sig, r.leverageCap);
+      els.autoLeverage.textContent = `${leverageDecision.leverage.toFixed(0)}x`;
+      log(`动态杠杆选择: ${leverageDecision.leverage.toFixed(0)}x / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
+
+      const plan = buildAutoTradePlan(filteredSignal, sig.price, sig.atr, sig, leverageDecision);
       if (!plan) {
         log(`当前最大保证金与杠杆不足以满足 LeverUp 最低开仓要求（至少 ${MIN_NOTIONAL_USD}U notional / ${MIN_MARGIN_USDC} ${COLLATERAL_SYMBOL} collateral），本次 ${filteredSignal} 信号跳过`);
         return;
