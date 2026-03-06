@@ -3182,10 +3182,10 @@
   function summarizeExistingPositions(positions) {
     if (!positions?.length) return '无';
     return positions.map(position => {
-      const side = position.isLong ? 'LONG' : 'SHORT';
+      const side = position.isLong ? '多单' : '空单';
       const entry = formatPrice(getPositionEntryPrice(position));
-      return `${side}@${entry}#${position.positionHash.slice(0, 8)}`;
-    }).join(', ');
+      return `${side}，开仓价 ${entry}，仓位ID ${position.positionHash.slice(0, 8)}...`;
+    }).join('；');
   }
 
   async function ensureMarketEntry(symbol, { force = false } = {}) {
