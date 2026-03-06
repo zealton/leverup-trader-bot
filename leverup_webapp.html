@@ -296,6 +296,9 @@
       resize: vertical;
       line-height: 1.55;
     }
+    #signalDiag {
+      min-height: 220px;
+    }
     .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
     .btns > button { flex: 1 1 180px; }
     button {
@@ -465,6 +468,52 @@
       margin-top: 12px;
       line-height: 1.6;
     }
+    .collapse {
+      margin-top: 14px;
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(18,18,18,.62), rgba(29,30,30,.5));
+      overflow: hidden;
+    }
+    .collapse summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      color: var(--text-soft);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      cursor: pointer;
+      user-select: none;
+    }
+    .collapse summary::-webkit-details-marker {
+      display: none;
+    }
+    .collapse summary::after {
+      content: "展开";
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .collapse[open] summary {
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .collapse[open] summary::after {
+      content: "收起";
+    }
+    .collapse-body {
+      padding: 14px;
+    }
+    .collapse-body .note:first-child,
+    .collapse-body .stat:first-child,
+    .collapse-body .row:first-child {
+      margin-top: 0;
+    }
     .full {
       margin-top: 18px;
       display: grid;
@@ -601,21 +650,6 @@
             <label>主钱包地址</label>
             <input id="traderAddress" placeholder="连接 MetaMask 后自动填充" />
           </div>
-          <div>
-            <label>RPC URL</label>
-            <input id="rpcUrl" placeholder="默认自动填充" />
-          </div>
-        </div>
-
-        <div class="row">
-          <div>
-            <label>本地 Trader Agent</label>
-            <input id="sessionAddress" readonly class="mono" placeholder="首次连接后自动生成并保存在本地浏览器" />
-          </div>
-          <div>
-            <label>当前链上授权</label>
-            <input id="authorizedAgent" readonly class="mono" placeholder="点击连接/刷新后检查" />
-          </div>
         </div>
 
         <div class="btns">
@@ -626,17 +660,40 @@
           <button id="refreshAuthBtn" class="secondary">刷新授权状态</button>
         </div>
 
-        <div class="note">
-          页面不会要求你输入任何私钥。首次连接后会在浏览器本地自动生成一个隐藏的 Trader Agent，并由 MetaMask 主钱包向 OneClickAgent 发送授权交易。
-          如果更换浏览器、清空本地存储或重置 Agent，需要重新授权后才能让 Bot 自动签名。
-        </div>
+        <details class="collapse">
+          <summary>高级网络 / Agent 信息</summary>
+          <div class="collapse-body">
+            <div class="row">
+              <div>
+                <label>RPC URL</label>
+                <input id="rpcUrl" placeholder="默认自动填充" />
+              </div>
+              <div>
+                <label>本地 Trader Agent</label>
+                <input id="sessionAddress" readonly class="mono" placeholder="首次连接后自动生成并保存在本地浏览器" />
+              </div>
+            </div>
 
-        <div class="stat">
-          <div><div class="k">OneClickAgent</div><div id="oneclickAgent" class="v mono" style="font-size:13px"></div></div>
-          <div><div class="k">LeverUp Diamond</div><div id="diamond" class="v mono" style="font-size:13px"></div></div>
-          <div><div class="k">USDC</div><div id="usdc" class="v mono" style="font-size:13px"></div></div>
-          <div><div class="k">LVUSD</div><div id="lvusd" class="v mono" style="font-size:13px"></div></div>
-        </div>
+            <div class="row">
+              <div>
+                <label>当前链上授权</label>
+                <input id="authorizedAgent" readonly class="mono" placeholder="点击连接/刷新后检查" />
+              </div>
+            </div>
+
+            <div class="note">
+              页面不会要求你输入任何私钥。首次连接后会在浏览器本地自动生成一个隐藏的 Trader Agent，并由 MetaMask 主钱包向 OneClickAgent 发送授权交易。
+              如果更换浏览器、清空本地存储或重置 Agent，需要重新授权后才能让 Bot 自动签名。
+            </div>
+
+            <div class="stat">
+              <div><div class="k">OneClickAgent</div><div id="oneclickAgent" class="v mono" style="font-size:13px"></div></div>
+              <div><div class="k">LeverUp Diamond</div><div id="diamond" class="v mono" style="font-size:13px"></div></div>
+              <div><div class="k">USDC</div><div id="usdc" class="v mono" style="font-size:13px"></div></div>
+              <div><div class="k">LVUSD</div><div id="lvusd" class="v mono" style="font-size:13px"></div></div>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
