@@ -891,7 +891,9 @@
         <div class="stat">
           <div><div class="k">最后动作</div><div id="lastAction" class="v" style="font-size:14px">-</div></div>
           <div><div class="k">冷却到</div><div id="cooldownUntil" class="v" style="font-size:14px">-</div></div>
-          <div><div class="k">今日已实现 PnL（含费）</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">今日已实现 PnL（不含开仓费）</div><div id="todayPnl" class="v">0</div></div>
+          <div><div class="k">今日手续费 / 成本 USD</div><div id="todayFees" class="v">0</div></div>
+          <div><div class="k">今日净结果 USD</div><div id="todayNet" class="v">0</div></div>
           <div><div class="k">今日交易量 USD</div><div id="todayVolume" class="v">0</div></div>
           <div><div class="k">当前持仓数</div><div id="openCount" class="v">0</div></div>
         </div>
@@ -1265,6 +1267,8 @@
     latestBySymbol: {},
     cooldownUntil: 0,
     dayPnl: Number(localStorage.getItem('leverup_dayPnl') || '0'),
+    dayFeesUsd: Number(localStorage.getItem('leverup_dayFeesUsd') || '0'),
+    dayNetUsd: Number(localStorage.getItem('leverup_dayNetUsd') || '0'),
     dayVolumeUsd: Number(localStorage.getItem('leverup_dayVolumeUsd') || '0'),
     lastAction: localStorage.getItem('leverup_lastAction') || '-',
     lastTradeTs: Number(localStorage.getItem('leverup_lastTradeTs') || '0'),
@@ -1653,6 +1657,42 @@
     return qty * price;
   }
 
+  function getHistoryTokenPriceUsd(item) {
+    const tokenPrice = Number(formatUnits(toBigIntOrZero(item?.tokenInPrice), 18));
+    return Number.isFinite(tokenPrice) && tokenPrice > 0 ? tokenPrice : 1;
+  }
+
+  function getHistoryOpenCosts(item) {
+    if (String(item?.operationType || '') !== 'OPEN_MARKET_TRADE' || !item?.detail) {
+      return { openFeeUsd: 0, executionFeeUsd: 0, totalCostUsd: 0 };
+    }
+    const notionalUsd = getHistoryExecutedVolumeUsd(item);
+    const tokenPriceUsd = getHistoryTokenPriceUsd(item);
+    const executionFee = Number(formatUnits(toBigIntOrZero(item.detail.executionFee), COLLATERAL_DECIMALS));
+    const executionFeeUsd = Number.isFinite(executionFee) ? executionFee * tokenPriceUsd : 0;
+    const openFeeUsd = notionalUsd * OPEN_FEE_RATE;
+    return {
+      openFeeUsd,
+      executionFeeUsd,
+      totalCostUsd: openFeeUsd + executionFeeUsd
+    };
+  }
+
+  function getHistoryCloseCostBreakdown(item) {
+    if (!isCloseTradeHistory(item) || !item?.detail) {
+      return { closeFeeUsd: 0, holdingFeeUsd: 0, fundingCostUsd: 0, paidCostUsd: 0 };
+    }
+    const closeFeeUsd = Number(formatUnits(toBigIntOrZero(item.detail.closeFee), COLLATERAL_DECIMALS));
+    const holdingFeeUsd = Number(formatUnits(toBigIntOrZero(item.detail.holdingFee), COLLATERAL_DECIMALS));
+    const fundingCostUsd = Number(formatUnits(toBigIntOrZero(item.detail.fundingFee), COLLATERAL_DECIMALS)) * -1;
+    return {
+      closeFeeUsd,
+      holdingFeeUsd,
+      fundingCostUsd,
+      paidCostUsd: closeFeeUsd + holdingFeeUsd + Math.max(0, fundingCostUsd)
+    };
+  }
+
   function getHistoryPnlAfterFee(item) {
     if (!item?.detail) return 0;
     const detail = item.detail;
@@ -1683,6 +1723,8 @@
   async function refreshDailyRealizedPnl({ silent = false } = {}) {
     if (!state.traderAddress) {
       state.dayPnl = 0;
+      state.dayFeesUsd = 0;
+      state.dayNetUsd = 0;
       state.dayVolumeUsd = 0;
       persistState();
       updateStatusPanel();
@@ -1691,6 +1733,8 @@
     try {
       const todayStartMs = getTodayStartMs();
       let totalPnl = 0;
+      let totalFeesUsd = 0;
+      let totalOpenCostsUsd = 0;
       let totalVolumeUsd = 0;
       let page = 0;
       let totalPages = DAILY_PNL_HISTORY_MAX_PAGES;
@@ -1708,8 +1752,14 @@
             reachedOlderEntries = true;
             continue;
           }
+          if (String(item?.operationType || '') === 'OPEN_MARKET_TRADE') {
+            const openCosts = getHistoryOpenCosts(item);
+            totalFeesUsd += openCosts.totalCostUsd;
+            totalOpenCostsUsd += openCosts.totalCostUsd;
+          }
           if (isCloseTradeHistory(item)) {
             totalPnl += getHistoryPnlAfterFee(item);
+            totalFeesUsd += getHistoryCloseCostBreakdown(item).paidCostUsd;
           }
           if (isExecutedVolumeTradeHistory(item)) {
             totalVolumeUsd += getHistoryExecutedVolumeUsd(item);
@@ -1721,6 +1771,8 @@
       }
 
       state.dayPnl = Number.isFinite(totalPnl) ? totalPnl : 0;
+      state.dayFeesUsd = Number.isFinite(totalFeesUsd) ? totalFeesUsd : 0;
+      state.dayNetUsd = Number.isFinite(totalPnl - totalOpenCostsUsd) ? totalPnl - totalOpenCostsUsd : 0;
       state.dayVolumeUsd = Number.isFinite(totalVolumeUsd) ? totalVolumeUsd : 0;
       persistState();
       updateStatusPanel();
@@ -1803,6 +1855,8 @@
 
   function persistState() {
     localStorage.setItem('leverup_dayPnl', String(state.dayPnl));
+    localStorage.setItem('leverup_dayFeesUsd', String(state.dayFeesUsd));
+    localStorage.setItem('leverup_dayNetUsd', String(state.dayNetUsd));
     localStorage.setItem('leverup_dayVolumeUsd', String(state.dayVolumeUsd));
     localStorage.setItem('leverup_lastAction', state.lastAction);
     localStorage.setItem('leverup_lastTradeTs', String(state.lastTradeTs));
@@ -3170,6 +3224,8 @@
     els.lastAction.textContent = state.lastAction;
     els.cooldownUntil.textContent = state.cooldownUntil ? new Date(state.cooldownUntil).toLocaleString('zh-CN', { hour12: false }) : '-';
     els.todayPnl.textContent = formatStatUsd(state.dayPnl);
+    if (els.todayFees) els.todayFees.textContent = formatStatUsd(state.dayFeesUsd);
+    if (els.todayNet) els.todayNet.textContent = formatStatUsd(state.dayNetUsd);
     if (els.todayVolume) els.todayVolume.textContent = formatStatUsd(state.dayVolumeUsd);
     updatePortfolioEntry();
   }
@@ -3320,6 +3376,8 @@
       if (!address) {
         state.traderAddress = '';
         state.dayPnl = 0;
+        state.dayFeesUsd = 0;
+        state.dayNetUsd = 0;
         state.dayVolumeUsd = 0;
         persistState();
         els.traderAddress.value = '';
@@ -3338,6 +3396,8 @@
       }
       state.traderAddress = address;
       state.dayPnl = 0;
+      state.dayFeesUsd = 0;
+      state.dayNetUsd = 0;
       state.dayVolumeUsd = 0;
       persistState();
       els.traderAddress.value = address;
