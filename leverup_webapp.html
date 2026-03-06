@@ -784,11 +784,11 @@
 
       <div class="hero-grid">
         <div>
-          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL / XRP / DOGE / MON 策略执行</p>
+          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL / DOGE / MON 策略执行</p>
           <div class="market-pills">
             <span><strong>LVUSD</strong> collateral</span>
             <span>MetaMask delegated agent</span>
-            <span>BTC / ETH / SOL / XRP / DOGE / MON</span>
+            <span>BTC / ETH / SOL / DOGE / MON</span>
           </div>
           <div class="usage-guide">
             <h3>使用步骤</h3>
@@ -796,7 +796,7 @@
               <li><strong>连接 MetaMask</strong>，确认钱包已切到正确网络。</li>
               <li><strong>授权 LVUSD</strong>，确保钱包对 LeverUp 合约的 collateral allowance 足够。</li>
               <li><strong>授权 Agent</strong>，让当前浏览器本地 Trader Agent 获得 1CT 签名权限。</li>
-              <li><strong>启动 Bot</strong>，让它持续扫描 BTC / ETH / SOL / XRP / DOGE / MON 并自动执行。</li>
+              <li><strong>启动 Bot</strong>，让它持续扫描 BTC / ETH / SOL / DOGE / MON 并自动执行。</li>
             </ol>
           </div>
         </div>
@@ -1006,8 +1006,8 @@
         </div>
 
         <div class="note">
-          BTC / ETH / SOL / XRP 当前普通交易对按 LeverUp 官方前端配置上限为 100x，DOGE/USD 当前上限为 50x，MON/USD 当前上限为 25x。
-          Bot 现在会固定扫描 BTC / ETH / SOL / XRP / DOGE / MON 六个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
+          BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x，DOGE/USD 当前上限为 50x，MON/USD 当前上限为 25x。
+          Bot 现在会固定扫描 BTC / ETH / SOL / DOGE / MON 五个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           当前默认风控也偏向“少跳过、多出手”：单笔风险默认 3.0%，止损默认 1.2 ATR，自动计划器允许在预算附近做适度超配。
@@ -1036,7 +1036,6 @@
               <option value="BTC">BTC</option>
               <option value="ETH">ETH</option>
               <option value="SOL">SOL</option>
-              <option value="XRP">XRP</option>
               <option value="DOGE">DOGE</option>
               <option value="MON">MON</option>
             </select>
@@ -1124,7 +1123,6 @@
         BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
         ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
         SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
-        XRP: { pairBase: '0xaeb724422620edb430dcaf22aeeff2e9388a578c', pythId: '0xec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8', maxLeverage: 100, historyTicker: 'Crypto.XRP/USD', historySource: 'binance' },
         DOGE: { pairBase: '0xba2ae424d960c26247dd6c32edc70b295c744c43', pythId: '0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c', maxLeverage: 50, historyTicker: 'Crypto.DOGE/USD', historySource: 'binance' },
         MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
@@ -1144,7 +1142,6 @@
         BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
         ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
         SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
-        XRP: { pairBase: '0xaeb724422620edb430dcaf22aeeff2e9388a578c', pythId: '0xec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8', maxLeverage: 100, historyTicker: 'Crypto.XRP/USD', historySource: 'binance' },
         DOGE: { pairBase: '0xba2ae424d960c26247dd6c32edc70b295c744c43', pythId: '0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c', maxLeverage: 50, historyTicker: 'Crypto.DOGE/USD', historySource: 'binance' },
         MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
