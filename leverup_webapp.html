@@ -684,7 +684,7 @@
           </div>
           <div>
             <label>可接受滑点 %</label>
-            <input id="slippagePct" type="number" min="0.5" max="2" step="0.1" value="1.0" />
+            <input id="slippagePct" type="number" min="0.5" max="5" step="0.1" value="1.0" />
           </div>
         </div>
         <div class="row-3">
@@ -704,7 +704,7 @@
         <div class="row-3">
           <div>
             <label>亏损后冷却分钟</label>
-            <input id="lossCooldown" type="number" step="1" value="90" />
+            <input id="lossCooldown" type="number" step="1" value="15" />
           </div>
           <div>
             <label>赢利后冷却分钟</label>
@@ -752,6 +752,7 @@
           BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
+          开仓如果因为可接受成交价过严被拒，会自动逐步上调滑点，最高尝试到 5%。
         </div>
 
         <div class="stat">
@@ -883,6 +884,8 @@
   const MIN_NOTIONAL_CHECK_BUFFER = 0.005;
   const COLLATERAL_SYMBOL = 'LVUSD';
   const COLLATERAL_DECIMALS = 18;
+  const MAX_AUTO_SLIPPAGE_PCT = 5;
+  const AUTO_SLIPPAGE_STEP_PCT = 0.5;
   const USDC_PYTH_ID = '0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a';
   const ONE_CLICK_AGENT_ABI = [
     {
@@ -1613,8 +1616,25 @@
     return { stopDistance, stopLoss, takeProfit };
   }
 
-  function getAcceptablePrice(side, price) {
-    const slippagePct = Math.max(0, Number(els.slippagePct.value) || 0);
+  function clampSlippagePct(value) {
+    return Math.max(0, Math.min(MAX_AUTO_SLIPPAGE_PCT, Number(value) || 0));
+  }
+
+  function getConfiguredSlippagePct() {
+    return clampSlippagePct(els.slippagePct.value);
+  }
+
+  function setSlippagePct(value) {
+    const next = clampSlippagePct(value);
+    els.slippagePct.value = next.toFixed(1);
+    return next;
+  }
+
+  function isAcceptablePriceError(error) {
+    return getErrorMessage(error).includes('price acceptable to the user');
+  }
+
+  function getAcceptablePrice(side, price, slippagePct = getConfiguredSlippagePct()) {
     const factor = side === 'LONG'
       ? 1 + slippagePct / 100
       : 1 - slippagePct / 100;
@@ -1724,13 +1744,13 @@
     });
   }
 
-  async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit }) {
+  async function sendOpenPosition({ symbol, isLong, margin, qtyBase, price, stopLoss, takeProfit, slippagePct = getConfiguredSlippagePct() }) {
     assertTradingReady();
     const pairBase = cfg().symbols[symbol].pairBase;
     const amountIn = parseUnits(String(margin.toFixed(COLLATERAL_DECIMALS)), COLLATERAL_DECIMALS);
     const qty = BigInt(Math.floor(qtyBase * 1e10));
     const side = isLong ? 'LONG' : 'SHORT';
-    const acceptablePrice = getAcceptablePrice(side, price);
+    const acceptablePrice = getAcceptablePrice(side, price, slippagePct);
     const px = parseUnits(String(acceptablePrice.toFixed(8)), 18);
     const sl = stopLoss > 0 ? parseUnits(String(stopLoss.toFixed(8)), 18) : 0n;
     const tp = takeProfit > 0 ? parseUnits(String(takeProfit.toFixed(8)), 18) : 0n;
@@ -1769,7 +1789,7 @@
       pythUpdateData
     };
 
-    log(`准备发送开仓: side=${side} ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${(Number(els.slippagePct.value) || 0).toFixed(1)}%`);
+    log(`准备发送开仓: side=${side} ref=${formatPrice(price)} acceptable=${formatPrice(acceptablePrice)} slippage=${slippagePct.toFixed(1)}%`);
     const url = `${cfg().keeperUrl}/v1/trading/send-open-position?blockchain=MONAD`;
     const res = await fetch(url, {
       method: 'POST',
@@ -1777,6 +1797,23 @@
       body: JSON.stringify(body)
     });
     return parseApiResponse(res, '开仓请求失败');
+  }
+
+  async function sendOpenPositionWithAdaptiveSlippage(params) {
+    let slippagePct = getConfiguredSlippagePct();
+    while (true) {
+      try {
+        return await sendOpenPosition({ ...params, slippagePct });
+      } catch (error) {
+        if (!isAcceptablePriceError(error)) throw error;
+        if (slippagePct >= MAX_AUTO_SLIPPAGE_PCT - 1e-9) {
+          throw new Error(`开仓在最大 ${MAX_AUTO_SLIPPAGE_PCT.toFixed(1)}% 滑点下仍失败: ${getErrorMessage(error)}`);
+        }
+        const nextSlippagePct = Math.min(MAX_AUTO_SLIPPAGE_PCT, slippagePct + AUTO_SLIPPAGE_STEP_PCT);
+        slippagePct = setSlippagePct(nextSlippagePct);
+        log(`开仓因可接受价格过严被拒，自动将滑点上调到 ${slippagePct.toFixed(1)}% 后重试`);
+      }
+    }
   }
 
   async function sendClosePosition(positionHash) {
@@ -1902,7 +1939,7 @@
       if (plan.floorApplied) {
         log(`为满足 LeverUp 最低开仓要求，本次 ${filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，高于目标风险预算 ${plan.riskBudgetUsd.toFixed(2)}U`);
       }
-      const openRes = await sendOpenPosition({
+      const openRes = await sendOpenPositionWithAdaptiveSlippage({
         symbol,
         isLong: filteredSignal === 'LONG',
         margin: Math.min(plan.margin, r.maxMargin),
@@ -1962,7 +1999,7 @@
     if (plan.floorAdjusted) {
       log(`手动参数低于 LeverUp 最低开仓要求，已自动上调保证金到 ${plan.margin.toFixed(2)} ${COLLATERAL_SYMBOL}（约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional）`);
     }
-    const res = await sendOpenPosition({
+    const res = await sendOpenPositionWithAdaptiveSlippage({
       symbol,
       isLong: side === 'LONG',
       margin: plan.margin,
