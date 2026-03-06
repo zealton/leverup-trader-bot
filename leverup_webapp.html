@@ -1286,6 +1286,8 @@
   const state = {
     traderAddress: '',
     sessionAccount: null,
+    walletProvider: null,
+    boundWalletProvider: null,
     currentAuthorizedAgent: ZERO_ADDRESS,
     agentAuthorized: false,
     authStatusNote: '',
@@ -1392,6 +1394,53 @@
 
   function shortAddress(address) {
     return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '-';
+  }
+
+  function getInjectedProviders() {
+    if (typeof window === 'undefined') return [];
+    const injected = window.ethereum;
+    if (!injected) return [];
+    if (Array.isArray(injected.providers) && injected.providers.length) {
+      return injected.providers.filter(Boolean);
+    }
+    return [injected];
+  }
+
+  function scoreInjectedProvider(provider) {
+    if (!provider) return -Infinity;
+    let score = 0;
+    if (provider.isMetaMask) score += 100;
+    if (provider.providers) score -= 20;
+    if (provider.isBraveWallet) score -= 80;
+    if (provider.isRabby) score -= 80;
+    if (provider.isCoinbaseWallet) score -= 80;
+    if (provider.isOKExWallet || provider.isOkxWallet) score -= 80;
+    if (provider.isBitKeep || provider.isTokenPocket) score -= 80;
+    return score;
+  }
+
+  function detectMetaMaskProvider() {
+    const providers = getInjectedProviders();
+    if (!providers.length) return null;
+    return [...providers].sort((a, b) => scoreInjectedProvider(b) - scoreInjectedProvider(a))[0] || null;
+  }
+
+  function getWalletProvider({ required = true } = {}) {
+    const provider = state.walletProvider || detectMetaMaskProvider();
+    if (provider) {
+      state.walletProvider = provider;
+      return provider;
+    }
+    if (!required) return null;
+    throw new Error('浏览器未检测到 MetaMask Provider。若安装了多个钱包扩展，请把 MetaMask 设为默认 EVM 钱包或暂时禁用其它钱包扩展后重试。');
+  }
+
+  function getWalletErrorMessage(error) {
+    const message = getErrorMessage(error);
+    if (/selectExtension|Unexpected error/i.test(message)) {
+      return `MetaMask 扩展选择失败。若浏览器安装了多个 EVM 钱包扩展，请在弹窗中明确选择 MetaMask；如果仍失败，先暂时禁用其它钱包扩展后再试。原始错误: ${message}`;
+    }
+    return message;
   }
 
   function getPendingOpenStorageKey() {
@@ -1760,8 +1809,9 @@
 
   function getReadClient() {
     if (state.publicClient) return state.publicClient;
+    const provider = getWalletProvider({ required: false });
     state.publicClient = createPublicClient({
-      transport: window.ethereum ? custom(window.ethereum) : http(els.rpcUrl.value)
+      transport: provider ? custom(provider) : http(els.rpcUrl.value)
     });
     return state.publicClient;
   }
@@ -1805,7 +1855,7 @@
   }
 
   async function approveCollateralToken() {
-    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    const provider = getWalletProvider();
     if (!state.traderAddress) throw new Error('请先连接 MetaMask');
     await switchToConfiguredNetwork();
     const client = getReadClient();
@@ -1826,12 +1876,17 @@
       functionName: 'approve',
       args: [cfg().diamond, MAX_UINT256]
     });
-    const txHash = await providerRequest('eth_sendTransaction', [{
-      from: state.traderAddress,
-      to: cfg().lvusd,
-      data,
-      gas: `0x${gas.toString(16)}`
-    }]);
+    const txHash = await provider.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: state.traderAddress,
+        to: cfg().lvusd,
+        data,
+        gas: `0x${gas.toString(16)}`
+      }]
+    }).catch(error => {
+      throw new Error(getWalletErrorMessage(error));
+    });
     log('已发送 LVUSD 授权交易:', txHash);
     const receipt = await waitForTransactionReceiptByProvider(txHash);
     if (!receipt) {
@@ -2233,6 +2288,72 @@
     localStorage.setItem('leverup_lastTradeTs', String(state.lastTradeTs));
   }
 
+  function handleWalletAccountsChanged(accounts) {
+    const [address] = accounts || [];
+    if (!address) {
+      state.traderAddress = '';
+      state.dayPnl = 0;
+      state.dayFeesUsd = 0;
+      state.dayNetUsd = 0;
+      state.dayVolumeUsd = 0;
+      persistState();
+      els.traderAddress.value = '';
+      updatePortfolioEntry();
+      updateCollateralStatusUi({ note: '未连接' });
+      state.pendingOpenBySymbol = {};
+      state.dynamicStopByPosition = {};
+      state.marketStopStateBySymbol = {};
+      state.historyTradeRestrictions = { updatedAt: 0, bySymbol: {} };
+      state.agentAuthorized = false;
+      state.currentAuthorizedAgent = ZERO_ADDRESS;
+      state.authStatusNote = '';
+      setBadge(els.mmDot, els.mmStatus, false, '未连接');
+      updateAuthorizationBadge();
+      updateStatusPanel();
+      stopBot();
+      log('MetaMask 已断开连接');
+      return;
+    }
+    state.traderAddress = address;
+    state.dayPnl = 0;
+    state.dayFeesUsd = 0;
+    state.dayNetUsd = 0;
+    state.dayVolumeUsd = 0;
+    persistState();
+    els.traderAddress.value = address;
+    updatePortfolioEntry();
+    hydratePendingOpenState();
+    hydrateDynamicStopState();
+    hydrateMarketStopState();
+    refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
+    setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
+    refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
+    refreshDailyRealizedPnl({ silent: true }).catch(e => log('账户切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
+    updateStatusPanel();
+    log('MetaMask 账户已切换:', address);
+  }
+
+  function handleWalletChainChanged() {
+    updateStaticNetworkFields();
+    if (state.traderAddress) {
+      refreshDailyRealizedPnl({ silent: true }).catch(e => log('链切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
+    }
+    log('检测到链切换，已刷新 RPC 与授权状态');
+  }
+
+  function bindWalletProviderEvents() {
+    const provider = getWalletProvider({ required: false });
+    if (!provider?.on) return;
+    if (state.boundWalletProvider && state.boundWalletProvider !== provider && state.boundWalletProvider.removeListener) {
+      state.boundWalletProvider.removeListener('accountsChanged', handleWalletAccountsChanged);
+      state.boundWalletProvider.removeListener('chainChanged', handleWalletChainChanged);
+    }
+    if (state.boundWalletProvider === provider) return;
+    provider.on('accountsChanged', handleWalletAccountsChanged);
+    provider.on('chainChanged', handleWalletChainChanged);
+    state.boundWalletProvider = provider;
+  }
+
   function updateStaticNetworkFields() {
     const c = cfg();
     els.rpcUrl.value = c.rpcUrl;
@@ -2240,9 +2361,12 @@
     els.diamond.textContent = c.diamond;
     els.usdc.textContent = c.usdc;
     els.lvusd.textContent = c.lvusd;
+    const provider = getWalletProvider({ required: false });
+    state.walletProvider = provider;
     state.publicClient = createPublicClient({
-      transport: window.ethereum ? custom(window.ethereum) : http(els.rpcUrl.value)
+      transport: provider ? custom(provider) : http(els.rpcUrl.value)
     });
+    bindWalletProviderEvents();
     if (state.traderAddress) {
       hydratePendingOpenState();
       hydrateDynamicStopState();
@@ -2259,25 +2383,29 @@
   }
 
   async function switchToConfiguredNetwork() {
-    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    const provider = getWalletProvider();
     const chainId = toChainHex(cfg().chainId);
     try {
-      await window.ethereum.request({
+      await provider.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId }]
       });
     } catch (err) {
-      if (err?.code !== 4902) throw err;
-      await window.ethereum.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId,
-          chainName: cfg().label,
-          rpcUrls: [cfg().rpcUrl],
-          blockExplorerUrls: [cfg().explorerUrl],
-          nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 }
-        }]
-      });
+      if (err?.code !== 4902) throw new Error(getWalletErrorMessage(err));
+      try {
+        await provider.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId,
+            chainName: cfg().label,
+            rpcUrls: [cfg().rpcUrl],
+            blockExplorerUrls: [cfg().explorerUrl],
+            nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 }
+          }]
+        });
+      } catch (addError) {
+        throw new Error(getWalletErrorMessage(addError));
+      }
     }
   }
 
@@ -2357,8 +2485,12 @@
   }
 
   async function providerRequest(method, params = []) {
-    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
-    return window.ethereum.request({ method, params });
+    const provider = getWalletProvider();
+    try {
+      return await provider.request({ method, params });
+    } catch (error) {
+      throw new Error(getWalletErrorMessage(error));
+    }
   }
 
   async function waitForTransactionByProvider(txHash, timeoutMs = 30000) {
@@ -2418,11 +2550,11 @@
   }
 
   async function writeAgentAuthorization(address) {
-    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
+    const provider = getWalletProvider();
     if (!state.traderAddress) throw new Error('请先连接 MetaMask');
     await switchToConfiguredNetwork();
     if (!state.publicClient) {
-      state.publicClient = createPublicClient({ transport: custom(window.ethereum) });
+      state.publicClient = createPublicClient({ transport: custom(provider) });
     }
     const data = encodeFunctionData({
       abi: ONE_CLICK_AGENT_ABI,
@@ -2492,12 +2624,13 @@
   }
 
   async function connectMetaMask() {
-    if (!window.ethereum) throw new Error('浏览器未检测到 MetaMask');
-    await switchToConfiguredNetwork();
-    state.publicClient = createPublicClient({ transport: custom(window.ethereum) });
+    const provider = getWalletProvider();
+    bindWalletProviderEvents();
+    state.publicClient = createPublicClient({ transport: custom(provider) });
     const accounts = await providerRequest('eth_requestAccounts');
     const [address] = accounts || [];
     if (!address) throw new Error('MetaMask 未返回可用账户');
+    await switchToConfiguredNetwork();
     state.traderAddress = address;
     els.traderAddress.value = address;
     updatePortfolioEntry();
@@ -4199,60 +4332,7 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   });
 
-  if (window.ethereum?.on) {
-    window.ethereum.on('accountsChanged', (accounts) => {
-      const [address] = accounts || [];
-      if (!address) {
-        state.traderAddress = '';
-        state.dayPnl = 0;
-        state.dayFeesUsd = 0;
-        state.dayNetUsd = 0;
-        state.dayVolumeUsd = 0;
-        persistState();
-        els.traderAddress.value = '';
-        updatePortfolioEntry();
-        updateCollateralStatusUi({ note: '未连接' });
-        state.pendingOpenBySymbol = {};
-        state.dynamicStopByPosition = {};
-        state.marketStopStateBySymbol = {};
-        state.historyTradeRestrictions = { updatedAt: 0, bySymbol: {} };
-        state.agentAuthorized = false;
-        state.currentAuthorizedAgent = ZERO_ADDRESS;
-        state.authStatusNote = '';
-        setBadge(els.mmDot, els.mmStatus, false, '未连接');
-        updateAuthorizationBadge();
-        updateStatusPanel();
-        stopBot();
-        log('MetaMask 已断开连接');
-        return;
-      }
-      state.traderAddress = address;
-      state.dayPnl = 0;
-      state.dayFeesUsd = 0;
-      state.dayNetUsd = 0;
-      state.dayVolumeUsd = 0;
-      persistState();
-      els.traderAddress.value = address;
-      updatePortfolioEntry();
-      hydratePendingOpenState();
-      hydrateDynamicStopState();
-      hydrateMarketStopState();
-      refreshCollateralApprovalStatus({ silent: true }).catch(e => log('账户切换后刷新 LVUSD 状态失败:', getErrorMessage(e)));
-      setBadge(els.mmDot, els.mmStatus, true, shortAddress(address));
-      refreshAgentAuthorizationStatus().catch(e => log('账户切换后刷新授权状态失败:', getErrorMessage(e)));
-      refreshDailyRealizedPnl({ silent: true }).catch(e => log('账户切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
-      updateStatusPanel();
-      log('MetaMask 账户已切换:', address);
-    });
-    window.ethereum.on('chainChanged', () => {
-      updateStaticNetworkFields();
-      if (state.traderAddress) {
-        refreshDailyRealizedPnl({ silent: true }).catch(e => log('链切换后刷新今日已实现 PnL 失败:', getErrorMessage(e)));
-      }
-      log('检测到链切换，已刷新 RPC 与授权状态');
-    });
-  }
-
+  bindWalletProviderEvents();
   ensureLocalAgent();
   updateStaticNetworkFields();
   updateManualLeverageBounds();
