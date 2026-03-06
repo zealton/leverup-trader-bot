@@ -637,11 +637,11 @@
 
       <div class="hero-grid">
         <div>
-          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL 策略执行</p>
+          <p class="sub">MetaMask 主钱包登录 + 页面本地隐藏 Trader Agent + LeverUp 1CT + BTC / ETH / SOL / MON 策略执行</p>
           <div class="market-pills">
             <span><strong>LVUSD</strong> collateral</span>
             <span>MetaMask delegated agent</span>
-            <span>BTC / ETH / SOL</span>
+            <span>BTC / ETH / SOL / MON</span>
           </div>
         </div>
         <div class="hero-summary">
@@ -834,8 +834,8 @@
         </div>
 
         <div class="note">
-          BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
-          Bot 现在会固定扫描 BTC / ETH / SOL 三个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
+          BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x，MON/USD 当前上限为 25x。
+          Bot 现在会固定扫描 BTC / ETH / SOL / MON 四个市场；手动交易标的选择已移到下方手动交易模块，信号诊断会跟随该标的同步显示。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           当前默认风控也偏向“少跳过、多出手”：单笔风险默认 3.0%，止损默认 1.2 ATR，自动计划器允许在预算附近做适度超配。
@@ -870,6 +870,7 @@
               <option value="BTC">BTC</option>
               <option value="ETH">ETH</option>
               <option value="SOL">SOL</option>
+              <option value="MON">MON</option>
             </select>
           </div>
           <div>
@@ -949,9 +950,10 @@
       usdc: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
       lvusd: '0xFD44B35139Ae53FFF7d8F2A9869c503D987f00d1',
       symbols: {
-        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' },
-        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' },
-        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d' }
+        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
+        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
+        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
+        MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
     },
     testnet: {
@@ -965,9 +967,10 @@
       usdc: '0xA1E873dFc5B1b69e268ab88de42E6e2090bc545a',
       lvusd: '0x76903262B1d4b70E3F2a5Af8Ed9F7E8Ace646Dcc',
       symbols: {
-        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' },
-        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace' },
-        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d' }
+        BTC: { pairBase: '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', pythId: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', maxLeverage: 100, historyTicker: 'Crypto.BTC/USD', historySource: 'binance' },
+        ETH: { pairBase: '0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37', pythId: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', maxLeverage: 100, historyTicker: 'Crypto.ETH/USD', historySource: 'binance' },
+        SOL: { pairBase: '0x0a3ec4fc70eaf64faf6eeda4e9b2bd4742a78546', pythId: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', maxLeverage: 100, historyTicker: 'Crypto.SOL/USD', historySource: 'binance' },
+        MON: { pairBase: '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', pythId: '0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1', maxLeverage: 25, historyTicker: 'Crypto.MON/USD', historySource: 'pyth' }
       }
     }
   };
@@ -1092,6 +1095,19 @@
 
   function getFocusSymbol() {
     return cfg().symbols[els.manualSymbol.value] ? els.manualSymbol.value : getTrackedSymbols()[0];
+  }
+
+  function getSymbolMaxLeverage(symbol = getFocusSymbol()) {
+    return getSymbolConfig(symbol).maxLeverage || MAX_SYMBOL_LEVERAGE;
+  }
+
+  function updateManualLeverageBounds() {
+    const symbol = getFocusSymbol();
+    const maxLeverage = getSymbolMaxLeverage(symbol);
+    els.manualLeverage.max = String(maxLeverage);
+    if (Number(els.manualLeverage.value) > maxLeverage) {
+      els.manualLeverage.value = String(maxLeverage);
+    }
   }
 
   function getSymbolConfig(symbol) {
@@ -1530,9 +1546,12 @@
     return signal;
   }
 
-  async function fetchKlines(symbol, interval, limit = 250) {
+  async function fetchBinanceKlines(symbol, interval, limit = 250) {
     const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`);
-    if (!res.ok) throw new Error(`获取 ${symbol} ${interval} K线失败`);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Binance ${symbol} ${interval} K线失败: HTTP ${res.status}${detail ? ` ${detail}` : ''}`);
+    }
     return (await res.json()).map(k => ({
       openTime: Number(k[0]),
       open: Number(k[1]),
@@ -1542,6 +1561,59 @@
       volume: Number(k[5]),
       closeTime: Number(k[6])
     }));
+  }
+
+  const PYTH_HISTORY_RESOLUTION = {
+    '1m': { value: '1', seconds: 60 },
+    '5m': { value: '5', seconds: 300 },
+    '15m': { value: '15', seconds: 900 },
+    '1h': { value: '60', seconds: 3600 },
+    '4h': { value: '240', seconds: 14400 },
+    '1d': { value: '1D', seconds: 86400 }
+  };
+
+  async function fetchPythBenchmarkKlines(symbol, interval, limit = 250) {
+    const symbolCfg = getSymbolConfig(symbol);
+    const resolution = PYTH_HISTORY_RESOLUTION[interval];
+    if (!resolution || !symbolCfg.historyTicker) {
+      throw new Error(`Pyth 不支持 ${symbol} ${interval} K线`);
+    }
+    const to = Math.floor(Date.now() / 1000);
+    const from = to - resolution.seconds * (limit + 5);
+    const url = `https://benchmarks.pyth.network/v1/shims/tradingview/history?symbol=${encodeURIComponent(symbolCfg.historyTicker)}&resolution=${resolution.value}&from=${from}&to=${to}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Pyth ${symbol} ${interval} K线失败: HTTP ${res.status}`);
+    const data = await res.json();
+    if (data?.s === 'error') {
+      throw new Error(`Pyth ${symbol} ${interval} K线失败: ${data.errorMessage || 'unknown error'}`);
+    }
+    const startIndex = Math.max(0, (data?.t?.length || 0) - limit);
+    return (data.t || []).slice(startIndex).map((timestamp, index) => {
+      const offset = startIndex + index;
+      return {
+        openTime: Number(timestamp) * 1000,
+        open: Number(data.o[offset]),
+        high: Number(data.h[offset]),
+        low: Number(data.l[offset]),
+        close: Number(data.c[offset]),
+        volume: Number(data.v[offset] || 0),
+        closeTime: (Number(timestamp) + resolution.seconds) * 1000
+      };
+    });
+  }
+
+  async function fetchKlines(symbol, interval, limit = 250) {
+    const symbolCfg = getSymbolConfig(symbol);
+    if (symbolCfg.historySource === 'pyth') {
+      return fetchPythBenchmarkKlines(symbol, interval, limit);
+    }
+    try {
+      return await fetchBinanceKlines(symbol, interval, limit);
+    } catch (error) {
+      if (!symbolCfg.historyTicker) throw error;
+      log(`${symbol} ${interval} Binance 行情失败，回退到 Pyth benchmark:`, getErrorMessage(error));
+      return fetchPythBenchmarkKlines(symbol, interval, limit);
+    }
   }
 
   function ema(values, period) {
@@ -1822,9 +1894,9 @@
     };
   }
 
-  function clampLeverage(v) {
+  function clampLeverage(v, maxLeverage = MAX_SYMBOL_LEVERAGE) {
     if (!Number.isFinite(v)) return 1;
-    return Math.min(MAX_SYMBOL_LEVERAGE, Math.max(1, v));
+    return Math.min(maxLeverage, Math.max(1, v));
   }
 
   function getBufferedMinNotionalUsd() {
@@ -1948,8 +2020,9 @@
     return Math.max(0.00000001, price * factor);
   }
 
-  function buildManualTradePlan(side, price, atrValue) {
-    const leverage = clampLeverage(Number(els.manualLeverage.value));
+  function buildManualTradePlan(side, price, atrValue, symbol = getFocusSymbol()) {
+    const maxLeverage = getSymbolMaxLeverage(symbol);
+    const leverage = clampLeverage(Number(els.manualLeverage.value), maxLeverage);
     const requestedMargin = Number(els.manualMargin.value);
     const minRequiredMargin = getMinRequiredMarginUsd(leverage);
     const margin = Math.max(minRequiredMargin, requestedMargin);
@@ -1962,6 +2035,7 @@
       notional,
       qtyBase,
       requestedMargin,
+      maxLeverage,
       minRequiredMargin,
       minRequiredNotionalUsd,
       floorAdjusted: margin > requestedMargin + 1e-9,
@@ -2368,7 +2442,11 @@
 
       let openedAny = false;
       for (const entry of openCandidates) {
-        const selection = selectAutoTradePlan(entry.filteredSignal, entry.sig, r);
+        const symbolRiskInputs = {
+          ...r,
+          leverageCap: Math.min(r.leverageCap, getSymbolMaxLeverage(entry.symbol))
+        };
+        const selection = selectAutoTradePlan(entry.filteredSignal, entry.sig, symbolRiskInputs);
         const leverageDecision = selection.selectedDecision || selection.targetDecision;
         entry.leverageDecision = leverageDecision;
         state.latestBySymbol[entry.symbol] = entry;
@@ -2479,7 +2557,11 @@
       score: scoreSignalCandidate(sig, side)
     };
     updateFocusedSignalPanel();
-    const plan = buildManualTradePlan(side, sig.price, sig.atr);
+    const requestedLeverage = Number(els.manualLeverage.value);
+    const plan = buildManualTradePlan(side, sig.price, sig.atr, symbol);
+    if (requestedLeverage > plan.maxLeverage + 1e-9) {
+      log(`手动杠杆超出 ${symbol} 可用上限，已自动从 ${requestedLeverage}x 调整到 ${plan.maxLeverage}x`);
+    }
     if (plan.floorAdjusted) {
       log(`手动参数低于 LeverUp 最低开仓要求，已自动上调保证金到 ${plan.margin.toFixed(2)} ${COLLATERAL_SYMBOL}（约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional）`);
     }
@@ -2537,7 +2619,10 @@
   els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
   els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
   els.stopBtn.addEventListener('click', stopBot);
-  els.manualSymbol.addEventListener('change', updateFocusedSignalPanel);
+  els.manualSymbol.addEventListener('change', () => {
+    updateManualLeverageBounds();
+    updateFocusedSignalPanel();
+  });
   els.openPortfolioBtn.addEventListener('click', () => {
     const url = getPortfolioUrl();
     if (!url) {
@@ -2578,6 +2663,7 @@
 
   ensureLocalAgent();
   updateStaticNetworkFields();
+  updateManualLeverageBounds();
   updateAuthorizationBadge();
   updateStatusPanel();
   updatePortfolioEntry();
