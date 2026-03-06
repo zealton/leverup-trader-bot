@@ -3010,6 +3010,15 @@
     return (position.isLong ? markPrice - entryPrice : entryPrice - markPrice) * qtyBase;
   }
 
+  function summarizeExistingPositions(positions) {
+    if (!positions?.length) return '无';
+    return positions.map(position => {
+      const side = position.isLong ? 'LONG' : 'SHORT';
+      const entry = formatPrice(getPositionEntryPrice(position));
+      return `${side}@${entry}#${position.positionHash.slice(0, 8)}`;
+    }).join(', ');
+  }
+
   async function ensureMarketEntry(symbol, { force = false } = {}) {
     const existing = state.latestBySymbol[symbol];
     if (!force && existing?.sig && Number.isFinite(existing.sig.price)) {
@@ -3125,6 +3134,20 @@
         log(`${entry.symbol} ${entry.filteredSignal} 跳过: 已有待确认开仓 ${getPendingOpenLabel(entry.symbol)}`);
       }
 
+      const occupiedCandidates = marketEntries
+        .filter(entry => entry.filteredSignal !== 'FLAT')
+        .map(entry => ({
+          entry,
+          positions: positionsBySymbol.get(entry.symbol) || []
+        }))
+        .filter(item => item.positions.length > 0);
+      for (const item of occupiedCandidates) {
+        log(
+          `${item.entry.symbol} ${item.entry.filteredSignal} 跳过: 已有仓位 ${summarizeExistingPositions(item.positions)}，` +
+          `当前未触发平仓条件`
+        );
+      }
+
       const openCandidates = marketEntries
         .filter(entry => entry.filteredSignal !== 'FLAT')
         .filter(entry => !(positionsBySymbol.get(entry.symbol)?.length))
@@ -3134,7 +3157,14 @@
       if (!openCandidates.length) {
         const focusSymbol = getFocusSymbol();
         const focusEntry = state.latestBySymbol[focusSymbol];
-        log(`${trigger} 无新信号: ${focusEntry ? summarizeSignalDecision(focusEntry.sig, focusEntry.filteredSignal) : '暂无聚焦标的诊断'}`);
+        const focusPositions = positionsBySymbol.get(focusSymbol) || [];
+        if (focusEntry?.filteredSignal !== 'FLAT' && focusPositions.length) {
+          log(`${trigger} 未开仓: ${focusSymbol} ${focusEntry.filteredSignal}，已有仓位 ${summarizeExistingPositions(focusPositions)}`);
+        } else if (focusEntry?.filteredSignal !== 'FLAT' && state.pendingOpenBySymbol[focusSymbol]) {
+          log(`${trigger} 未开仓: ${focusSymbol} ${focusEntry.filteredSignal}，已有待确认开仓 ${getPendingOpenLabel(focusSymbol)}`);
+        } else {
+          log(`${trigger} 无新信号: ${focusEntry ? summarizeSignalDecision(focusEntry.sig, focusEntry.filteredSignal) : '暂无聚焦标的诊断'}`);
+        }
         return;
       }
 
