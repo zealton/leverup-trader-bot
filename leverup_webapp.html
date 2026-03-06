@@ -1187,7 +1187,25 @@
         fallbackMessage;
       throw new Error(`HTTP ${res.status} ${res.statusText}: ${detail}`);
     }
-    return json || {};
+    if (json !== null) return json;
+    return raw ? raw.trim() : {};
+  }
+
+  function normalizeTradingSubmitResponse(result) {
+    if (typeof result === 'string') {
+      return { input_hash: result };
+    }
+    if (result && typeof result === 'object') {
+      const normalizedInputHash =
+        result.input_hash ||
+        result.inputHash ||
+        (typeof result.result === 'string' ? result.result : '') ||
+        (typeof result.data === 'string' ? result.data : '');
+      return normalizedInputHash
+        ? { ...result, input_hash: normalizedInputHash }
+        : result;
+    }
+    return {};
   }
 
   function classifyLogTone(message) {
@@ -2157,7 +2175,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    return parseApiResponse(res, '开仓请求失败');
+    return normalizeTradingSubmitResponse(await parseApiResponse(res, '开仓请求失败'));
   }
 
   async function sendOpenPositionWithAdaptiveSlippage(params) {
@@ -2187,7 +2205,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ positionHash, deadline: Number(deadline), signature })
     });
-    return parseApiResponse(res, '平仓请求失败');
+    return normalizeTradingSubmitResponse(await parseApiResponse(res, '平仓请求失败'));
   }
 
   async function waitExecution(inputHash, timeoutMs = 90000) {
@@ -2400,6 +2418,8 @@
           if (openRes.input_hash) {
             const status = await waitExecution(openRes.input_hash).catch(e => ({ success: false, reason: e.message }));
             log(`开仓状态: ${entry.symbol}`, JSON.stringify(status));
+          } else {
+            log(`开仓请求未返回 input_hash: ${entry.symbol} ${entry.filteredSignal}`);
           }
           state.lastAction = `开仓 ${entry.symbol} ${entry.filteredSignal}`;
           state.lastTradeTs = Date.now();
@@ -2476,6 +2496,8 @@
     if (res.input_hash) {
       const status = await waitExecution(res.input_hash).catch(e => ({ success: false, reason: e.message }));
       log('手动开仓状态:', JSON.stringify(status));
+    } else {
+      log(`手动开仓请求未返回 input_hash: ${symbol} ${side}`);
     }
     await fetchTrackedPositions();
   }
@@ -2489,6 +2511,8 @@
         if (res.input_hash) {
           const status = await waitExecution(res.input_hash).catch(err => ({ success: false, reason: err.message }));
           log('手动平仓状态:', JSON.stringify(status));
+        } else {
+          log(`手动平仓请求未返回 input_hash: ${closeHash}`);
         }
         await fetchTrackedPositions();
       } catch (err) {
