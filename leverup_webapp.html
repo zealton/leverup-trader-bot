@@ -386,6 +386,27 @@
       border-color: rgba(60,255,225,.24);
       box-shadow: none;
     }
+    .portfolio-cta {
+      flex: 1 1 100%;
+      min-height: 52px;
+      background: linear-gradient(135deg, #ccff00 0%, #8dff2d 100%);
+      color: #050505;
+      border-color: rgba(204,255,0,.55);
+      box-shadow: 0 0 0 1px rgba(204,255,0,.16), 0 16px 30px rgba(204,255,0,.22);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+    .portfolio-cta:hover:not(:disabled) {
+      background: linear-gradient(135deg, #d8ff45 0%, #98ff3c 100%);
+      border-color: rgba(204,255,0,.72);
+    }
+    .portfolio-cta:disabled {
+      background: linear-gradient(135deg, rgba(204,255,0,.18), rgba(141,255,45,.14));
+      color: rgba(245,247,247,.72);
+      border-color: rgba(204,255,0,.18);
+      box-shadow: none;
+    }
     .badge {
       display: flex;
       align-items: center;
@@ -880,7 +901,7 @@
           </div>
         </div>
         <div class="btns">
-          <button id="openPortfolioBtn" class="secondary" disabled>查看 LeverUp 仓位</button>
+          <button id="openPortfolioBtn" class="portfolio-cta" disabled>查看 LeverUp 仓位</button>
         </div>
         <div class="note">
           这里查看的是当前主钱包地址在 LeverUp 的 Portfolio 页面。Bot 的仓位归属于主钱包地址，不是本地 Agent 地址。
