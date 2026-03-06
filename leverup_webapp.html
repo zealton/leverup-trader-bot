@@ -587,7 +587,7 @@
             </select>
           </div>
           <div>
-            <label>策略标的</label>
+            <label>查看 / 手动标的</label>
             <select id="symbol">
               <option value="BTC">BTC</option>
               <option value="ETH">ETH</option>
@@ -750,6 +750,7 @@
 
         <div class="note">
           BTC / ETH / SOL 当前普通交易对按 LeverUp 官方前端配置上限为 100x。
+          Bot 现在会固定扫描 BTC / ETH / SOL 三个市场；这里的标的选择主要用于手动交易、信号诊断和界面聚焦显示。
           平台当前最低要求是至少 10 LVUSD collateral，且单笔 notional 至少 200 USD；按官方前端的 fee / buffer 逻辑，实际可过单门槛会略高于 200U。低于门槛会自动抬到最低可下单规模，或直接跳过。
           当前默认入场风格为“激进”：保留 4h 趋势过滤，但把 15m 触发条件放宽为 EMA20 站回 / 回踩 / 突破三者择一，更容易出手。
           自动杠杆不会固定写死；Bot 会按 15m 波动和 4h 趋势强弱，在 10x 到你设定上限之间动态挑选实际杠杆。
@@ -809,6 +810,7 @@
           <table>
             <thead>
               <tr>
+                <th>市场</th>
                 <th>Hash</th>
                 <th>方向</th>
                 <th>保证金</th>
@@ -818,7 +820,7 @@
               </tr>
             </thead>
             <tbody id="positionsBody">
-              <tr><td colspan="6" style="color:var(--muted)">暂无数据</td></tr>
+              <tr><td colspan="7" style="color:var(--muted)">暂无数据</td></tr>
             </tbody>
           </table>
         </div>
@@ -975,6 +977,7 @@
     timer: null,
     running: false,
     latest: null,
+    latestBySymbol: {},
     cooldownUntil: 0,
     dayPnl: Number(localStorage.getItem('leverup_dayPnl') || '0'),
     lastAction: localStorage.getItem('leverup_lastAction') || '-',
@@ -983,6 +986,24 @@
 
   function cfg() {
     return CONFIG[els.network.value];
+  }
+
+  function getTrackedSymbols() {
+    return Object.keys(cfg().symbols);
+  }
+
+  function getFocusSymbol() {
+    return cfg().symbols[els.symbol.value] ? els.symbol.value : getTrackedSymbols()[0];
+  }
+
+  function getSymbolConfig(symbol) {
+    const symbolCfg = cfg().symbols[symbol];
+    if (!symbolCfg) throw new Error(`未知标的: ${symbol}`);
+    return symbolCfg;
+  }
+
+  function resolveSymbolFromPairBase(pairBase) {
+    return Object.entries(cfg().symbols).find(([, value]) => value.pairBase.toLowerCase() === String(pairBase).toLowerCase())?.[0] || '-';
   }
 
   function shortAddress(address) {
@@ -1414,8 +1435,12 @@
     const lastEma200_4h = ema200_4h[ema200_4h.length - 1];
     const trendUp = lastEma50_4h > lastEma200_4h;
     const trendDown = lastEma50_4h < lastEma200_4h;
+    const trendUpSoft = trendUp || lastPrice > lastEma50_4h;
+    const trendDownSoft = trendDown || lastPrice < lastEma50_4h;
     const ema20Rising = lastEma20 > prevEma20;
     const ema20Falling = lastEma20 < prevEma20;
+    const ema20SupportiveLong = ema20Rising || lastEma20 >= prevEma20 * 0.999;
+    const ema20SupportiveShort = ema20Falling || lastEma20 <= prevEma20 * 1.001;
     const longTouchThreshold = lastEma20 * 1.002;
     const shortTouchThreshold = lastEma20 * 0.998;
     const longTouchEma = last15.low <= longTouchThreshold;
@@ -1424,15 +1449,21 @@
     const shortBreakdown = last15.close < prev15.low;
     const closeAboveEma = last15.close > lastEma20;
     const closeBelowEma = last15.close < lastEma20;
+    const closeNearAboveEma = last15.close >= lastEma20 * 0.998;
+    const closeNearBelowEma = last15.close <= lastEma20 * 1.002;
     const longReclaim = prev15.close <= prevEma20 && closeAboveEma;
     const shortReclaim = prev15.close >= prevEma20 && closeBelowEma;
-    const aggressiveLongTrigger = longTouchEma || longBreakout || longReclaim;
-    const aggressiveShortTrigger = shortTouchEma || shortBreakdown || shortReclaim;
+    const longMomentumBar = last15.close > prev15.close;
+    const shortMomentumBar = last15.close < prev15.close;
+    const aggressiveLongTrigger = longTouchEma || longBreakout || longReclaim || longMomentumBar;
+    const aggressiveShortTrigger = shortTouchEma || shortBreakdown || shortReclaim || shortMomentumBar;
     const pullbackLong = longTouchEma && longBreakout;
     const pullbackShort = shortTouchEma && shortBreakdown;
     const entryMode = els.entryMode?.value || 'aggressive';
-    const aggressiveLong = trendUp && closeAboveEma && ema20Rising && aggressiveLongTrigger;
-    const aggressiveShort = trendDown && closeBelowEma && ema20Falling && aggressiveShortTrigger;
+    const trendGapPct = lastPrice > 0 ? Math.abs(lastEma50_4h - lastEma200_4h) / lastPrice : 0;
+    const emaStretchPct = lastPrice > 0 ? Math.abs(lastPrice - lastEma20) / lastPrice : 0;
+    const aggressiveLong = trendUpSoft && closeNearAboveEma && ema20SupportiveLong && aggressiveLongTrigger;
+    const aggressiveShort = trendDownSoft && closeNearBelowEma && ema20SupportiveShort && aggressiveShortTrigger;
 
     let signal = 'FLAT';
     if (entryMode === 'aggressive') {
@@ -1457,20 +1488,30 @@
         lastEma200_4h,
         trendUp,
         trendDown,
+        trendUpSoft,
+        trendDownSoft,
         ema20Rising,
         ema20Falling,
+        ema20SupportiveLong,
+        ema20SupportiveShort,
         longTouchEma,
         shortTouchEma,
         longBreakout,
         shortBreakdown,
         closeAboveEma,
         closeBelowEma,
+        closeNearAboveEma,
+        closeNearBelowEma,
         longReclaim,
         shortReclaim,
+        longMomentumBar,
+        shortMomentumBar,
         aggressiveLongTrigger,
         aggressiveShortTrigger,
         aggressiveLong,
         aggressiveShort,
+        trendGapPct,
+        emaStretchPct,
         longTouchThreshold,
         shortTouchThreshold,
         last15Low: last15.low,
@@ -1493,11 +1534,11 @@
     const aggressive = d.entryMode === 'aggressive';
     if (side === 'LONG') {
       const reasons = [];
-      if (!d.trendUp) reasons.push(`4h 非多头: EMA50 ${formatPrice(d.lastEma50_4h)} <= EMA200 ${formatPrice(d.lastEma200_4h)}`);
+      if (!d.trendUpSoft) reasons.push(`4h 未形成多头偏向: EMA50 ${formatPrice(d.lastEma50_4h)} / EMA200 ${formatPrice(d.lastEma200_4h)} / price ${formatPrice(d.last15Close)}`);
       if (aggressive) {
-        if (!d.closeAboveEma) reasons.push(`15m 收盘未站上 EMA20: close ${formatPrice(d.last15Close)} <= EMA20 ${formatPrice(d.lastEma20)}`);
-        if (!d.ema20Rising) reasons.push(`15m EMA20 未上拐: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
-        if (!d.aggressiveLongTrigger) reasons.push(`15m 未触发任一入场项: 回踩=${d.longTouchEma ? '是' : '否'} 突破=${d.longBreakout ? '是' : '否'} 站回=${d.longReclaim ? '是' : '否'}`);
+        if (!d.closeNearAboveEma) reasons.push(`15m 收盘仍偏弱: close ${formatPrice(d.last15Close)} < EMA20 容差 ${formatPrice(d.lastEma20 * 0.998)}`);
+        if (!d.ema20SupportiveLong) reasons.push(`15m EMA20 偏弱: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
+        if (!d.aggressiveLongTrigger) reasons.push(`15m 未触发任一入场项: 回踩=${d.longTouchEma ? '是' : '否'} 突破=${d.longBreakout ? '是' : '否'} 站回=${d.longReclaim ? '是' : '否'} 续涨=${d.longMomentumBar ? '是' : '否'}`);
       } else {
         if (!d.longTouchEma) reasons.push(`15m 未回踩 EMA20: low ${formatPrice(d.last15Low)} > 阈值 ${formatPrice(d.longTouchThreshold)}`);
         if (!d.longBreakout) reasons.push(`15m 未突破前高: close ${formatPrice(d.last15Close)} <= prevHigh ${formatPrice(d.prev15High)}`);
@@ -1505,11 +1546,11 @@
       return reasons;
     }
     const reasons = [];
-    if (!d.trendDown) reasons.push(`4h 非空头: EMA50 ${formatPrice(d.lastEma50_4h)} >= EMA200 ${formatPrice(d.lastEma200_4h)}`);
+    if (!d.trendDownSoft) reasons.push(`4h 未形成空头偏向: EMA50 ${formatPrice(d.lastEma50_4h)} / EMA200 ${formatPrice(d.lastEma200_4h)} / price ${formatPrice(d.last15Close)}`);
     if (aggressive) {
-      if (!d.closeBelowEma) reasons.push(`15m 收盘未跌破 EMA20: close ${formatPrice(d.last15Close)} >= EMA20 ${formatPrice(d.lastEma20)}`);
-      if (!d.ema20Falling) reasons.push(`15m EMA20 未下拐: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
-      if (!d.aggressiveShortTrigger) reasons.push(`15m 未触发任一入场项: 回抽=${d.shortTouchEma ? '是' : '否'} 跌破=${d.shortBreakdown ? '是' : '否'} 失守=${d.shortReclaim ? '是' : '否'}`);
+      if (!d.closeNearBelowEma) reasons.push(`15m 收盘仍偏强: close ${formatPrice(d.last15Close)} > EMA20 容差 ${formatPrice(d.lastEma20 * 1.002)}`);
+      if (!d.ema20SupportiveShort) reasons.push(`15m EMA20 偏强: prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)}`);
+      if (!d.aggressiveShortTrigger) reasons.push(`15m 未触发任一入场项: 回抽=${d.shortTouchEma ? '是' : '否'} 跌破=${d.shortBreakdown ? '是' : '否'} 失守=${d.shortReclaim ? '是' : '否'} 续跌=${d.shortMomentumBar ? '是' : '否'}`);
     } else {
       if (!d.shortTouchEma) reasons.push(`15m 未回抽 EMA20: high ${formatPrice(d.last15High)} < 阈值 ${formatPrice(d.shortTouchThreshold)}`);
       if (!d.shortBreakdown) reasons.push(`15m 未跌破前低: close ${formatPrice(d.last15Close)} >= prevLow ${formatPrice(d.prev15Low)}`);
@@ -1531,7 +1572,7 @@
     return `LONG 缺失: ${longReasons.join('；')} | SHORT 缺失: ${shortReasons.join('；')}`;
   }
 
-  function renderSignalDiagnostics(sig, filteredSignal) {
+  function renderSignalDiagnostics(sig, filteredSignal, symbol = getFocusSymbol()) {
     if (!els.signalDiag) return;
     if (!sig?.diag) {
       els.signalDiag.value = '运行一次策略后显示诊断';
@@ -1541,6 +1582,7 @@
     const modeMap = { both: '双向', long: '只做多', short: '只做空' };
     const entryModeMap = { aggressive: '激进', conservative: '稳健' };
     const lines = [
+      `查看标的: ${symbol}`,
       `原始信号: ${sig.signal}`,
       `过滤后信号: ${filteredSignal}`,
       `方向设置: ${modeMap[els.directionMode.value] || '双向'}`,
@@ -1549,24 +1591,81 @@
       `15m 参考: close=${formatPrice(d.last15Close)} low=${formatPrice(d.last15Low)} high=${formatPrice(d.last15High)} EMA20=${formatPrice(d.lastEma20)}`,
       '',
       `LONG 条件`,
-      `- 4h 多头趋势: ${d.trendUp ? '通过' : '未通过'}`,
-      `- 15m 收盘站上 EMA20: ${d.closeAboveEma ? '通过' : '未通过'}`,
-      `- 15m EMA20 斜率向上: ${d.ema20Rising ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
+      `- 4h 多头偏向: ${d.trendUpSoft ? '通过' : '未通过'}`,
+      `- 15m 收盘位于 EMA20 上方容差内: ${d.closeNearAboveEma ? '通过' : '未通过'}`,
+      `- 15m EMA20 未明显转弱: ${d.ema20SupportiveLong ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
       `- 15m 回踩 EMA20: ${d.longTouchEma ? '通过' : '未通过'} (low ${formatPrice(d.last15Low)} / 阈值 ${formatPrice(d.longTouchThreshold)})`,
       `- 15m 突破前高: ${d.longBreakout ? '通过' : '未通过'} (close ${formatPrice(d.last15Close)} / prevHigh ${formatPrice(d.prev15High)})`,
       `- 15m 站回 EMA20: ${d.longReclaim ? '通过' : '未通过'}`,
+      `- 15m 续涨动能: ${d.longMomentumBar ? '通过' : '未通过'}`,
       '',
       `SHORT 条件`,
-      `- 4h 空头趋势: ${d.trendDown ? '通过' : '未通过'}`,
-      `- 15m 收盘跌破 EMA20: ${d.closeBelowEma ? '通过' : '未通过'}`,
-      `- 15m EMA20 斜率向下: ${d.ema20Falling ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
+      `- 4h 空头偏向: ${d.trendDownSoft ? '通过' : '未通过'}`,
+      `- 15m 收盘位于 EMA20 下方容差内: ${d.closeNearBelowEma ? '通过' : '未通过'}`,
+      `- 15m EMA20 未明显转强: ${d.ema20SupportiveShort ? '通过' : '未通过'} (prev ${formatPrice(d.prevEma20)} / now ${formatPrice(d.lastEma20)})`,
       `- 15m 回抽 EMA20: ${d.shortTouchEma ? '通过' : '未通过'} (high ${formatPrice(d.last15High)} / 阈值 ${formatPrice(d.shortTouchThreshold)})`,
       `- 15m 跌破前低: ${d.shortBreakdown ? '通过' : '未通过'} (close ${formatPrice(d.last15Close)} / prevLow ${formatPrice(d.prev15Low)})`,
       `- 15m 失守 EMA20: ${d.shortReclaim ? '通过' : '未通过'}`,
+      `- 15m 续跌动能: ${d.shortMomentumBar ? '通过' : '未通过'}`,
       '',
       `结论: ${summarizeSignalDecision(sig, filteredSignal)}`
     ];
     els.signalDiag.value = lines.join('\n');
+  }
+
+  function scoreSignalCandidate(sig, filteredSignal) {
+    if (!sig?.diag || filteredSignal === 'FLAT') return -Infinity;
+    const d = sig.diag;
+    let score = 0;
+    score += Math.min(3, d.trendGapPct * 180);
+    score += Math.max(0, 1.2 - d.emaStretchPct * 120);
+    if (filteredSignal === 'LONG') {
+      if (d.longBreakout) score += 2.2;
+      if (d.longReclaim) score += 1.6;
+      if (d.longTouchEma) score += 1.1;
+      if (d.longMomentumBar) score += 0.7;
+      if (d.trendUp) score += 0.8;
+    } else {
+      if (d.shortBreakdown) score += 2.2;
+      if (d.shortReclaim) score += 1.6;
+      if (d.shortTouchEma) score += 1.1;
+      if (d.shortMomentumBar) score += 0.7;
+      if (d.trendDown) score += 0.8;
+    }
+    return score;
+  }
+
+  function updateFocusedSignalPanel() {
+    const symbol = getFocusSymbol();
+    const entry = state.latestBySymbol[symbol];
+    if (!entry) {
+      els.signal15.textContent = '-';
+      els.signal4h.textContent = '-';
+      els.lastPrice.textContent = '-';
+      els.lastAtr.textContent = '-';
+      els.autoLeverage.textContent = '-';
+      if (els.signalDiag) els.signalDiag.value = '运行一次策略后显示诊断';
+      return;
+    }
+    const { sig, filteredSignal, leverageDecision } = entry;
+    els.signal15.textContent = `${symbol} ${sig.signal}`;
+    els.signal4h.textContent = `${symbol} ${sig.trend}`;
+    els.lastPrice.textContent = formatPrice(sig.price);
+    els.lastAtr.textContent = formatPrice(sig.atr);
+    els.autoLeverage.textContent = leverageDecision ? `${leverageDecision.leverage.toFixed(0)}x` : '-';
+    renderSignalDiagnostics(sig, filteredSignal, symbol);
+  }
+
+  async function analyzeMarketSymbol(symbol) {
+    const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
+    const sig = analyzeSignal(k15, k4h);
+    const filteredSignal = getDirectionFilter(sig.signal);
+    return {
+      symbol,
+      sig,
+      filteredSignal,
+      score: scoreSignalCandidate(sig, filteredSignal)
+    };
   }
 
   function clampLeverage(v) {
@@ -1898,14 +1997,29 @@
     throw new Error('等待执行超时');
   }
 
-  async function fetchPositions() {
+  async function fetchPositionsForSymbol(symbol) {
     if (!state.traderAddress) return [];
-    const pairBase = cfg().symbols[els.symbol.value].pairBase;
+    const pairBase = getSymbolConfig(symbol).pairBase;
     const positions = await state.publicClient.readContract({
       address: cfg().diamond,
       abi: POSITIONS_ABI,
       functionName: 'getPositionsV2',
       args: [state.traderAddress, pairBase]
+    });
+    return positions.map(position => ({ ...position, market: symbol }));
+  }
+
+  async function fetchTrackedPositions() {
+    if (!state.traderAddress) {
+      renderPositions([]);
+      els.openCount.textContent = '0';
+      return [];
+    }
+    const settled = await Promise.allSettled(getTrackedSymbols().map(symbol => fetchPositionsForSymbol(symbol)));
+    const positions = settled.flatMap((result, index) => {
+      if (result.status === 'fulfilled') return result.value;
+      log(`${getTrackedSymbols()[index]} 持仓读取失败:`, getErrorMessage(result.reason));
+      return [];
     });
     renderPositions(positions);
     els.openCount.textContent = String(positions.length);
@@ -1914,11 +2028,12 @@
 
   function renderPositions(positions) {
     if (!positions.length) {
-      els.positionsBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">暂无持仓</td></tr>';
+      els.positionsBody.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">暂无持仓</td></tr>';
       return;
     }
-    els.positionsBody.innerHTML = positions.map((p, idx) => `
+    els.positionsBody.innerHTML = positions.map((p) => `
       <tr>
+        <td>${p.market || resolveSymbolFromPairBase(p.pairBase)}</td>
         <td class="mono">${p.positionHash.slice(0, 10)}...</td>
         <td>${p.isLong ? 'LONG' : 'SHORT'}</td>
         <td>${Number(formatUnits(p.margin, 6)).toFixed(2)}</td>
@@ -1926,6 +2041,25 @@
         <td>${formatPrice(Number(formatUnits(p.entryPrice, 18)))}</td>
         <td><button class="danger" data-close="${p.positionHash}">平仓</button></td>
       </tr>`).join('');
+  }
+
+  function shouldCloseTrackedPosition(position, sig, filteredSignal, riskInputs) {
+    const entry = Number(formatUnits(position.entryPrice, 18));
+    const isLong = !!position.isLong;
+    const heldMins = (Date.now() / 1000 - Number(position.timestamp)) / 60;
+    return (
+      heldMins >= riskInputs.maxHoldMins ||
+      (isLong && (
+        sig.price <= entry - sig.atr * riskInputs.slAtr ||
+        sig.price >= entry + sig.atr * riskInputs.slAtr * riskInputs.tpRr ||
+        filteredSignal === 'SHORT'
+      )) ||
+      (!isLong && (
+        sig.price >= entry + sig.atr * riskInputs.slAtr ||
+        sig.price <= entry - sig.atr * riskInputs.slAtr * riskInputs.tpRr ||
+        filteredSignal === 'LONG'
+      ))
+    );
   }
 
   async function runStrategyCycle(trigger = 'bot') {
@@ -1936,91 +2070,127 @@
         return;
       }
 
-      const symbol = els.symbol.value;
-      const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
-      const sig = analyzeSignal(k15, k4h);
-      state.latest = sig;
-      els.signal15.textContent = sig.signal;
-      els.signal4h.textContent = sig.trend;
-      els.lastPrice.textContent = formatPrice(sig.price);
-      els.lastAtr.textContent = formatPrice(sig.atr);
-      els.autoLeverage.textContent = '-';
-
-      const positions = await fetchPositions();
-      const filteredSignal = getDirectionFilter(sig.signal);
-      renderSignalDiagnostics(sig, filteredSignal);
       const r = getRiskInputs();
+      const trackedSymbols = getTrackedSymbols();
+      const scanResults = await Promise.allSettled(trackedSymbols.map(symbol => analyzeMarketSymbol(symbol)));
+      const marketEntries = scanResults.flatMap((result, index) => {
+        if (result.status === 'fulfilled') return [result.value];
+        log(`${trackedSymbols[index]} 行情分析失败:`, getErrorMessage(result.reason));
+        return [];
+      });
+
+      if (!marketEntries.length) {
+        throw new Error('三个市场的行情都未能成功获取');
+      }
+
+      state.latest = marketEntries[0].sig;
+      state.latestBySymbol = Object.fromEntries(marketEntries.map(entry => [entry.symbol, entry]));
+      updateFocusedSignalPanel();
+
+      const positions = await fetchTrackedPositions();
+      const positionsBySymbol = new Map(trackedSymbols.map(symbol => [symbol, []]));
+      for (const position of positions) {
+        const market = position.market || resolveSymbolFromPairBase(position.pairBase);
+        if (!positionsBySymbol.has(market)) positionsBySymbol.set(market, []);
+        positionsBySymbol.get(market).push(position);
+      }
+
+      const scanSummary = marketEntries
+        .sort((a, b) => b.score - a.score)
+        .map(entry => `${entry.symbol}:${entry.filteredSignal}${entry.filteredSignal === 'FLAT' ? '' : `(${entry.score.toFixed(1)})`}`)
+        .join(' ');
+      log(`${trigger} 扫描结果: ${scanSummary}`);
 
       if (Math.abs(state.dayPnl) >= r.dayStopPct) {
         log('已触发日亏损熔断，停止新开仓');
         return;
       }
 
-      if (positions.length > 0) {
-        const p = positions[0];
-        const entry = Number(formatUnits(p.entryPrice, 18));
-        const isLong = !!p.isLong;
-        const heldMins = (Date.now() / 1000 - Number(p.timestamp)) / 60;
-        const shouldClose =
-          heldMins >= r.maxHoldMins ||
-          (isLong && (sig.price <= entry - sig.atr * r.slAtr || sig.price >= entry + sig.atr * r.slAtr * r.tpRr || filteredSignal === 'SHORT')) ||
-          (!isLong && (sig.price >= entry + sig.atr * r.slAtr || sig.price <= entry - sig.atr * r.slAtr * r.tpRr || filteredSignal === 'LONG'));
-        if (shouldClose) {
-          log(`触发平仓条件，position=${p.positionHash}`);
-          const closeRes = await sendClosePosition(p.positionHash);
+      let closedAny = false;
+      for (const position of positions) {
+        const market = position.market || resolveSymbolFromPairBase(position.pairBase);
+        const marketEntry = state.latestBySymbol[market];
+        if (!marketEntry) continue;
+        if (shouldCloseTrackedPosition(position, marketEntry.sig, marketEntry.filteredSignal, r)) {
+          log(`触发平仓条件: ${market} position=${position.positionHash}`);
+          const closeRes = await sendClosePosition(position.positionHash);
           log('已发送平仓请求:', JSON.stringify(closeRes));
           if (closeRes.input_hash) {
             const status = await waitExecution(closeRes.input_hash).catch(e => ({ success: false, reason: e.message }));
             log('平仓状态:', JSON.stringify(status));
           }
-          state.lastAction = '平仓';
+          state.lastAction = `平仓 ${market}`;
           state.lastTradeTs = Date.now();
-          state.cooldownUntil = Date.now() + 1000 * 60 * r.lossCooldown;
-          persistState();
-          updateStatusPanel();
-          await fetchPositions();
-        } else {
-          log('已有持仓，当前未触发平仓条件');
+          closedAny = true;
         }
+      }
+      if (closedAny) {
+        state.cooldownUntil = Date.now() + 1000 * 60 * r.lossCooldown;
+        persistState();
+        updateStatusPanel();
+        await fetchTrackedPositions();
         return;
       }
 
-      if (filteredSignal === 'FLAT') {
-        log(`${trigger} 无新信号: ${summarizeSignalDecision(sig, filteredSignal)}`);
+      const openCandidates = marketEntries
+        .filter(entry => entry.filteredSignal !== 'FLAT')
+        .filter(entry => !(positionsBySymbol.get(entry.symbol)?.length))
+        .sort((a, b) => b.score - a.score);
+
+      if (!openCandidates.length) {
+        const focusSymbol = getFocusSymbol();
+        const focusEntry = state.latestBySymbol[focusSymbol];
+        log(`${trigger} 无新信号: ${focusEntry ? summarizeSignalDecision(focusEntry.sig, focusEntry.filteredSignal) : '暂无聚焦标的诊断'}`);
         return;
       }
 
-      const leverageDecision = pickAutoLeverage(filteredSignal, sig, r.leverageCap);
-      els.autoLeverage.textContent = `${leverageDecision.leverage.toFixed(0)}x`;
-      log(`动态杠杆选择: ${leverageDecision.leverage.toFixed(0)}x / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
+      let openedAny = false;
+      for (const entry of openCandidates) {
+        const leverageDecision = pickAutoLeverage(entry.filteredSignal, entry.sig, r.leverageCap);
+        entry.leverageDecision = leverageDecision;
+        state.latestBySymbol[entry.symbol] = entry;
+        if (entry.symbol === getFocusSymbol()) {
+          updateFocusedSignalPanel();
+        }
+        log(`动态杠杆选择: ${entry.symbol} ${leverageDecision.leverage.toFixed(0)}x / cap ${leverageDecision.leverageCap.toFixed(0)}x / ATR ${(leverageDecision.atrPct * 100).toFixed(2)}% / trend ${(leverageDecision.trendGapPct * 100).toFixed(2)}%`);
 
-      const plan = buildAutoTradePlan(filteredSignal, sig.price, sig.atr, sig, leverageDecision);
-      if (!plan) {
-        log(`当前最大保证金与杠杆不足以满足 LeverUp 最低开仓要求（至少 ${MIN_NOTIONAL_USD}U notional / ${MIN_MARGIN_USDC} ${COLLATERAL_SYMBOL} collateral），本次 ${filteredSignal} 信号跳过`);
-        return;
+        const plan = buildAutoTradePlan(entry.filteredSignal, entry.sig.price, entry.sig.atr, entry.sig, leverageDecision);
+        if (!plan) {
+          log(`当前最大保证金与杠杆不足以满足 LeverUp 最低开仓要求，本次 ${entry.symbol} ${entry.filteredSignal} 信号跳过`);
+          continue;
+        }
+        if (plan.floorApplied) {
+          log(`为满足 LeverUp 最低开仓要求，本次 ${entry.symbol} ${entry.filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，高于目标风险预算 ${plan.riskBudgetUsd.toFixed(2)}U`);
+        }
+
+        try {
+          const openRes = await sendOpenPositionWithAdaptiveSlippage({
+            symbol: entry.symbol,
+            isLong: entry.filteredSignal === 'LONG',
+            margin: Math.min(plan.margin, r.maxMargin),
+            qtyBase: plan.qtyBase,
+            price: entry.sig.price,
+            stopLoss: plan.stopLoss,
+            takeProfit: plan.takeProfit
+          });
+          log(`已发送开仓请求: ${entry.symbol} ${entry.filteredSignal}`, JSON.stringify(openRes));
+          if (openRes.input_hash) {
+            const status = await waitExecution(openRes.input_hash).catch(e => ({ success: false, reason: e.message }));
+            log(`开仓状态: ${entry.symbol}`, JSON.stringify(status));
+          }
+          state.lastAction = `开仓 ${entry.symbol} ${entry.filteredSignal}`;
+          state.lastTradeTs = Date.now();
+          openedAny = true;
+        } catch (openError) {
+          log(`${entry.symbol} 开仓失败:`, getErrorMessage(openError));
+        }
       }
-      if (plan.floorApplied) {
-        log(`为满足 LeverUp 最低开仓要求，本次 ${filteredSignal} 自动抬升到约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional；预计单笔风险约 ${plan.effectiveRiskUsd.toFixed(2)}U，高于目标风险预算 ${plan.riskBudgetUsd.toFixed(2)}U`);
+
+      if (openedAny) {
+        persistState();
+        updateStatusPanel();
+        await fetchTrackedPositions();
       }
-      const openRes = await sendOpenPositionWithAdaptiveSlippage({
-        symbol,
-        isLong: filteredSignal === 'LONG',
-        margin: Math.min(plan.margin, r.maxMargin),
-        qtyBase: plan.qtyBase,
-        price: sig.price,
-        stopLoss: plan.stopLoss,
-        takeProfit: plan.takeProfit
-      });
-      log('已发送开仓请求:', JSON.stringify(openRes));
-      if (openRes.input_hash) {
-        const status = await waitExecution(openRes.input_hash).catch(e => ({ success: false, reason: e.message }));
-        log('开仓状态:', JSON.stringify(status));
-      }
-      state.lastAction = `开仓 ${filteredSignal}`;
-      state.lastTradeTs = Date.now();
-      persistState();
-      updateStatusPanel();
-      await fetchPositions();
     } catch (e) {
       log('策略执行失败:', getErrorMessage(e));
       throw e;
@@ -2055,9 +2225,17 @@
 
   async function manualOpen() {
     const side = els.manualSide.value === 'long' ? 'LONG' : 'SHORT';
-    const symbol = els.symbol.value;
+    const symbol = getFocusSymbol();
     const [k15, k4h] = await Promise.all([fetchKlines(symbol, '15m', 250), fetchKlines(symbol, '4h', 250)]);
     const sig = analyzeSignal(k15, k4h);
+    state.latest = sig;
+    state.latestBySymbol[symbol] = {
+      symbol,
+      sig,
+      filteredSignal: side,
+      score: scoreSignalCandidate(sig, side)
+    };
+    updateFocusedSignalPanel();
     const plan = buildManualTradePlan(side, sig.price, sig.atr);
     if (plan.floorAdjusted) {
       log(`手动参数低于 LeverUp 最低开仓要求，已自动上调保证金到 ${plan.margin.toFixed(2)} ${COLLATERAL_SYMBOL}（约 ${plan.minRequiredNotionalUsd.toFixed(0)}U notional）`);
@@ -2076,7 +2254,7 @@
       const status = await waitExecution(res.input_hash).catch(e => ({ success: false, reason: e.message }));
       log('手动开仓状态:', JSON.stringify(status));
     }
-    await fetchPositions();
+    await fetchTrackedPositions();
   }
 
   document.addEventListener('click', async (e) => {
@@ -2089,7 +2267,7 @@
           const status = await waitExecution(res.input_hash).catch(err => ({ success: false, reason: err.message }));
           log('手动平仓状态:', JSON.stringify(status));
         }
-        await fetchPositions();
+        await fetchTrackedPositions();
       } catch (err) {
         log('手动平仓失败:', getErrorMessage(err));
       }
@@ -2107,11 +2285,12 @@
   els.authorizeAgentBtn.addEventListener('click', () => authorizeLocalAgent().catch(e => log('授权失败:', getErrorMessage(e))));
   els.revokeAgentBtn.addEventListener('click', () => revokeLocalAgent().catch(e => log('撤销授权失败:', getErrorMessage(e))));
   els.refreshAuthBtn.addEventListener('click', () => refreshAgentAuthorizationStatus().catch(e => log('刷新授权状态失败:', getErrorMessage(e))));
-  els.refreshPosBtn.addEventListener('click', () => fetchPositions().catch(e => log('刷新持仓失败:', getErrorMessage(e))));
+  els.refreshPosBtn.addEventListener('click', () => fetchTrackedPositions().catch(e => log('刷新持仓失败:', getErrorMessage(e))));
   els.manualOpenBtn.addEventListener('click', () => manualOpen().catch(e => log('手动开仓失败:', getErrorMessage(e))));
   els.runOnceBtn.addEventListener('click', () => runStrategyCycle('manual').catch(() => {}));
   els.startBtn.addEventListener('click', () => { try { startBot(); } catch (e) { log('启动 Bot 失败:', getErrorMessage(e)); } });
   els.stopBtn.addEventListener('click', stopBot);
+  els.symbol.addEventListener('change', updateFocusedSignalPanel);
   els.openPortfolioBtn.addEventListener('click', () => {
     const url = getPortfolioUrl();
     if (!url) {
